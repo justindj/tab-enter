@@ -1,0 +1,28 @@
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local data: database, artifacts, run logs, secrets. Never commit.
+.tab-enter/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+secrets.enc
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+
+.DS_Store
+Thumbs.db

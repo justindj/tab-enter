@@ -1,0 +1,19 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 21000,
+  "num_turns": 4,
+  "result": "{\"blockers\":[],\"suggestions\":[{\"file\":\"src/cart/total.ts\",\"line\":14,\"reason\":\"Round once at the end instead of per line item.\"}],\"questions\":[],\"verdict\":\"approve_with_comments\"}",
+  "session_id": "5f0c1d2e-0000-4000-8000-000000000002",
+  "total_cost_usd": 0.0311,
+  "usage": {
+    "input_tokens": 9100,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 210
+  },
+  "modelUsage": {
+    "claude-sonnet-5-5": { "inputTokens": 9100, "outputTokens": 210, "costUSD": 0.0311 }
+  }
+}

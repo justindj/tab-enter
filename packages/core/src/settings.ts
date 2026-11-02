@@ -1,0 +1,221 @@
+import { z } from 'zod';
+
+// Per-profile settings. Secrets are never stored here: only the *names* of
+// keychain entries live on the profile row (see packages/secrets).
+
+export const DEFAULT_KEY_REGEX = '[A-Z][A-Z0-9]+-\\d+';
+
+export const PresetIdSchema = z.enum([
+  'work-ticket',
+  'address-feedback',
+  'code-review',
+  'verification-script',
+  'short-text',
+]);
+export type PresetId = z.infer<typeof PresetIdSchema>;
+
+export const TaskPresetSchema = z.object({
+  label: z.string(),
+  /** Model alias (sonnet, haiku, opus). The model actually used is recorded from the run result. */
+  model: z.string(),
+  allowedTools: z.array(z.string()),
+  disallowedTools: z.array(z.string()),
+  permissionMode: z.enum(['default', 'acceptEdits', 'plan']),
+  maxTurns: z.number().int().positive(),
+  /** task = streamed, edits files; analysis = single JSON result, read-only or minimal tools. */
+  mode: z.enum(['task', 'analysis']),
+});
+export type TaskPreset = z.infer<typeof TaskPresetSchema>;
+
+// Test, lint and build commands only. Claude may commit locally; it may never push.
+const SCOPED_BASH = [
+  'Bash(npm test:*)',
+  'Bash(npm run test:*)',
+  'Bash(npm run lint:*)',
+  'Bash(npm run build:*)',
+  'Bash(npm run typecheck:*)',
+  'Bash(pnpm test:*)',
+  'Bash(pnpm lint:*)',
+  'Bash(pnpm build:*)',
+  'Bash(pnpm typecheck:*)',
+  'Bash(yarn test:*)',
+  'Bash(git status:*)',
+  'Bash(git diff:*)',
+  'Bash(git log:*)',
+  'Bash(git add:*)',
+  'Bash(git commit:*)',
+];
+const EDIT_TOOLS = ['Read', 'Edit', 'Write', 'Grep', 'Glob'];
+
+export const DEFAULT_PRESETS: Record<PresetId, TaskPreset> = {
+  'work-ticket': {
+    label: 'Work a ticket',
+    model: 'sonnet',
+    allowedTools: [...EDIT_TOOLS, ...SCOPED_BASH],
+    disallowedTools: [],
+    permissionMode: 'acceptEdits',
+    maxTurns: 50,
+    mode: 'task',
+  },
+  'address-feedback': {
+    label: 'Address MR feedback / fix pipeline',
+    model: 'sonnet',
+    allowedTools: [...EDIT_TOOLS, ...SCOPED_BASH],
+    disallowedTools: [],
+    permissionMode: 'acceptEdits',
+    maxTurns: 30,
+    mode: 'task',
+  },
+  'code-review': {
+    label: 'Code review',
+    model: 'sonnet',
+    allowedTools: ['Read', 'Grep', 'Glob'],
+    disallowedTools: ['Edit', 'Write', 'NotebookEdit', 'Bash'],
+    permissionMode: 'default',
+    maxTurns: 15,
+    mode: 'analysis',
+  },
+  'verification-script': {
+    label: 'Verification script',
+    model: 'sonnet',
+    // {{artifactsDir}} is substituted at run time so Write is limited to the run's artifacts folder.
+    allowedTools: ['Read', 'Grep', 'Glob', 'Write({{artifactsDir}}/**)', 'Bash(npx playwright:*)'],
+    disallowedTools: ['Edit'],
+    permissionMode: 'acceptEdits',
+    maxTurns: 30,
+    mode: 'analysis',
+  },
+  'short-text': {
+    label: 'Short text (captions, polish, summaries)',
+    model: 'haiku',
+    allowedTools: [],
+    disallowedTools: ['Read', 'Edit', 'Write', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch'],
+    permissionMode: 'default',
+    maxTurns: 1,
+    mode: 'analysis',
+  },
+};
+
+const VerificationProjectSchema = z.object({
+  startCommand: z.string().optional(),
+  baseUrl: z.string().optional(),
+  /** Name of a keychain entry holding test-user credentials. Never the credentials themselves. */
+  testCredentialsSecret: z.string().optional(),
+});
+
+export const WatchedProjectSchema = z.object({
+  /** GitLab numeric project id or url-encoded path. */
+  id: z.string(),
+  path: z.string(),
+  localPath: z.string().optional(),
+  verification: VerificationProjectSchema.prefault({}),
+});
+export type WatchedProject = z.infer<typeof WatchedProjectSchema>;
+
+export const DailyReportWindowSchema = z.object({
+  mode: z.enum(['last24h', 'sinceLastReport', 'sinceDate', 'customHours']).default('last24h'),
+  customHours: z.number().positive().optional(),
+  sinceDate: z.string().optional(),
+  mondayCoversWeekend: z.boolean().default(true),
+});
+
+export const ProfileSettingsSchema = z.object({
+  jira: z
+    .object({
+      deployment: z.enum(['cloud', 'datacenter']).default('cloud'),
+      baseUrl: z.string().default(''),
+      /** Jira Cloud only: account email used with the API token. */
+      email: z.string().default(''),
+      /** Optional board id; when unset "current sprint" means `sprint in openSprints()`. */
+      boardId: z.string().optional(),
+      sprintOnlyDefault: z.boolean().default(true),
+      doneStatuses: z.array(z.string()).default([]),
+      blockedStatuses: z.array(z.string()).default(['Blocked']),
+      tokenExpiresAt: z.string().optional(),
+    })
+    .prefault({}),
+  gitlab: z
+    .object({
+      baseUrl: z.string().default('https://gitlab.com'),
+      projects: z.array(WatchedProjectSchema).default([]),
+    })
+    .prefault({}),
+  keyRegex: z.string().default(DEFAULT_KEY_REGEX),
+  claude: z
+    .object({
+      approvedForClient: z.boolean().default(false),
+      maxParallelRuns: z.number().int().min(1).max(8).default(2),
+      presets: z.record(PresetIdSchema, TaskPresetSchema).default(DEFAULT_PRESETS),
+      softLimits: z
+        .object({
+          perRunUsd: z.number().positive().optional(),
+          perDayUsd: z.number().positive().optional(),
+        })
+        .prefault({}),
+    })
+    .prefault({}),
+  rtk: z
+    .object({
+      mode: z.enum(['off', 'global', 'per-run']).default('off'),
+      // Each of these can send client content to another service. Off unless explicitly opted in.
+      routing: z.boolean().default(false),
+      proxy: z.boolean().default(false),
+      telemetry: z.boolean().default(false),
+    })
+    .prefault({}),
+  timeWindows: z
+    .object({
+      dailyReport: DailyReportWindowSchema.prefault({}),
+      recentRetentionDays: z.number().positive().default(3),
+      staleReviewHours: z.number().positive().default(24),
+    })
+    .prefault({}),
+  contextCaps: z
+    .object({
+      descriptionChars: z.number().int().positive().default(4000),
+      commentsCount: z.number().int().nonnegative().default(5),
+      jobLogTailLines: z.number().int().positive().default(120),
+      diffChars: z.number().int().positive().default(60000),
+    })
+    .prefault({}),
+  reviewExcludeGlobs: z
+    .array(z.string())
+    .default([
+      '**/pnpm-lock.yaml',
+      '**/package-lock.json',
+      '**/yarn.lock',
+      '**/*.snap',
+      '**/vendor/**',
+      '**/dist/**',
+      '**/*.min.js',
+      '**/*.generated.*',
+    ]),
+  verification: z
+    .object({
+      captureVideo: z.boolean().default(false),
+    })
+    .prefault({}),
+  // Every write action is off by default and still needs a confirmation click when on.
+  writeActions: z
+    .object({
+      jiraTransition: z.boolean().default(false),
+      jiraComment: z.boolean().default(false),
+      gitlabComment: z.boolean().default(false),
+      gitlabApprove: z.boolean().default(false),
+      gitPush: z.boolean().default(false),
+      openMergeRequest: z.boolean().default(false),
+    })
+    .prefault({}),
+  syncIntervalMinutes: z.number().int().min(1).default(5),
+});
+
+export type ProfileSettings = z.infer<typeof ProfileSettingsSchema>;
+
+export function defaultProfileSettings(): ProfileSettings {
+  return ProfileSettingsSchema.parse({});
+}
+
+/** Parse stored settings, filling in defaults for fields added since they were saved. */
+export function parseProfileSettings(raw: unknown): ProfileSettings {
+  return ProfileSettingsSchema.parse(raw ?? {});
+}
