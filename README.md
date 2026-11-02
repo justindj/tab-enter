@@ -44,4 +44,4 @@ fixtures/         Invented demo data and recorded Claude Code output
 
 ## License
 
-MIT
+Apache License 2.0. See [LICENSE](LICENSE).

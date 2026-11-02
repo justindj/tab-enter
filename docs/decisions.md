@@ -17,6 +17,10 @@ and say why.
 
 ## Stack and repository
 
+- **License: Apache 2.0, not MIT** (decided 2026-11-02). The spec says MIT, but the GitHub repo
+  was created with an Apache 2.0 license and the owner chose to keep it. Its patent grant is the
+  main difference.
+
 - **SQLite driver: `@libsql/client`, not `better-sqlite3`.** libsql ships prebuilt N-API binaries,
   so it installs on new Node majors (development started on Node 26) without a C++ toolchain. Its
   async API also matches the Postgres drivers a hosted version would use. Drizzle supports both.
