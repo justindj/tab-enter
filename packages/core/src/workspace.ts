@@ -1,5 +1,5 @@
 import { deriveMRStatus, type DerivedMRStatus } from './mr-status';
-import type { IssueDetail, LinkSource, MergeRequest } from './types';
+import type { IssueDetail, LinkSource, ManualLink, MergeRequest, MRIssueLink } from './types';
 import { mrKey } from './types';
 
 // Assemble what the pages show from synced rows. Plain code, no I/O, so the
@@ -14,6 +14,8 @@ export interface WorkspaceInput {
     needsMyReview: boolean;
   }[];
   links: { mrKey: string; issueKey: string; source: LinkSource }[];
+  /** Manual overrides; only the "unlink" ones are surfaced (so they can be undone). */
+  manual?: ManualLink[];
   now: Date;
   retentionDays: number;
 }
@@ -23,6 +25,10 @@ export interface MRView {
   mr: MergeRequest;
   status: DerivedMRStatus;
   issueKeys: string[];
+  /** Same keys as issueKeys, with the rule (or manual action) that linked each. */
+  links: MRIssueLink[];
+  /** Keys the rules found but the user unlinked. */
+  unlinkedKeys: string[];
   isMine: boolean;
   isReviewer: boolean;
   needsMyReview: boolean;
@@ -50,20 +56,32 @@ export function buildWorkspace(input: WorkspaceInput): Workspace {
   const cutoff = input.now.getTime() - input.retentionDays * 86_400_000;
   const issuesByKey = new Map(input.issues.map((i) => [i.key, i]));
 
-  const keysByMr = new Map<string, string[]>();
-  for (const link of input.links) {
-    keysByMr.set(link.mrKey, [...(keysByMr.get(link.mrKey) ?? []), link.issueKey]);
+  const linksByMr = new Map<string, MRIssueLink[]>();
+  for (const { mrKey: key, issueKey, source } of input.links) {
+    linksByMr.set(key, [...(linksByMr.get(key) ?? []), { issueKey, source }]);
+  }
+  const unlinkedByMr = new Map<string, string[]>();
+  for (const m of input.manual ?? []) {
+    if (m.action === 'unlink') {
+      unlinkedByMr.set(m.mrKey, [...(unlinkedByMr.get(m.mrKey) ?? []), m.issueKey]);
+    }
   }
 
-  const views: MRView[] = input.mergeRequests.map(({ mr, isMine, isReviewer, needsMyReview }) => ({
-    key: mrKey(mr.ref),
-    mr,
-    status: deriveMRStatus(mr),
-    issueKeys: keysByMr.get(mrKey(mr.ref)) ?? [],
-    isMine,
-    isReviewer,
-    needsMyReview,
-  }));
+  const views: MRView[] = input.mergeRequests.map(({ mr, isMine, isReviewer, needsMyReview }) => {
+    const key = mrKey(mr.ref);
+    const links = linksByMr.get(key) ?? [];
+    return {
+      key,
+      mr,
+      status: deriveMRStatus(mr),
+      issueKeys: links.map((l) => l.issueKey),
+      links,
+      unlinkedKeys: unlinkedByMr.get(key) ?? [],
+      isMine,
+      isReviewer,
+      needsMyReview,
+    };
+  });
 
   const inFlight = views.filter((v) => v.isMine && v.mr.state === 'opened');
   const activeIssues = input.issues

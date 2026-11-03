@@ -9,6 +9,7 @@ import {
   hasPendingJob,
   listIssues,
   listLinks,
+  listManualLinks,
   listMergeRequests,
   listProfiles,
 } from '@tab-enter/db';
@@ -35,10 +36,11 @@ export const loadApp = cache(async () => {
   const [profiles, active] = await Promise.all([listProfiles(db), getActiveProfile(db)]);
   if (!active) throw new Error('No profile found.');
 
-  const [issues, mergeRequests, links, syncStates, syncing, tools] = await Promise.all([
+  const [issues, mergeRequests, links, manual, syncStates, syncing, tools] = await Promise.all([
     listIssues(db, active.id),
     listMergeRequests(db, active.id),
     listLinks(db, active.id),
+    listManualLinks(db, active.id),
     getSyncStates(db, active.id),
     hasPendingJob(db, 'sync', active.id),
     getToolStatuses(db),
@@ -48,6 +50,7 @@ export const loadApp = cache(async () => {
     issues,
     mergeRequests,
     links,
+    manual,
     now,
     retentionDays: active.settings.timeWindows.recentRetentionDays,
   });

@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import {
   LOCAL_USER_ID,
   defaultProfileSettings,
+  linkMergeRequest,
+  manualOverrideFor,
   mrKey,
   parseProfileSettings,
   type IssueDetail,
@@ -357,6 +359,85 @@ export async function getSyncStates(db: Db, profileId: string) {
 export async function listManualLinks(db: Db, profileId: string): Promise<ManualLink[]> {
   const rows = await db.select().from(manualLinks).where(eq(manualLinks.profileId, profileId));
   return rows.map(({ mrKey: key, issueKey, action }) => ({ mrKey: key, issueKey, action }));
+}
+
+/** Store (or, with null, clear) the user's override for one MR/issue pair. */
+export async function setManualOverride(
+  db: Db,
+  profileId: string,
+  pair: { mrKey: string; issueKey: string },
+  action: 'link' | 'unlink' | null,
+  userId = LOCAL_USER_ID,
+): Promise<void> {
+  const where = and(
+    eq(manualLinks.profileId, profileId),
+    eq(manualLinks.mrKey, pair.mrKey),
+    eq(manualLinks.issueKey, pair.issueKey),
+  );
+  if (action === null) {
+    await db.delete(manualLinks).where(where);
+    return;
+  }
+  const createdAt = new Date();
+  await db
+    .insert(manualLinks)
+    .values({ userId, profileId, ...pair, action, createdAt })
+    .onConflictDoUpdate({
+      target: [manualLinks.profileId, manualLinks.mrKey, manualLinks.issueKey],
+      set: { action, createdAt },
+    });
+}
+
+export async function getMergeRequest(
+  db: Db,
+  profileId: string,
+  key: string,
+): Promise<MergeRequest | null> {
+  const [row] = await db
+    .select({ data: mergeRequests.data })
+    .from(mergeRequests)
+    .where(and(eq(mergeRequests.profileId, profileId), eq(mergeRequests.mrKey, key)));
+  return row?.data ?? null;
+}
+
+/**
+ * Link or unlink an MR and a ticket by hand. Stores only the difference from
+ * what the linking rules find, then recomputes that MR's links immediately.
+ * Returns false when the MR isn't in the local data.
+ */
+export async function changeManualLink(
+  db: Db,
+  profileId: string,
+  change: { mrKey: string; issueKey: string; linked: boolean },
+  keyRegex: string,
+): Promise<boolean> {
+  const mr = await getMergeRequest(db, profileId, change.mrKey);
+  if (!mr) return false;
+  const action = manualOverrideFor(mr, change.issueKey, change.linked, keyRegex);
+  await setManualOverride(db, profileId, change, action);
+  const manual = await listManualLinks(db, profileId);
+  await replaceLinksForMr(db, profileId, change.mrKey, linkMergeRequest(mr, { keyRegex, manual }));
+  return true;
+}
+
+/** Replace one MR's computed links, so a manual change shows without waiting for a sync. */
+export async function replaceLinksForMr(
+  db: Db,
+  profileId: string,
+  key: string,
+  links: MRIssueLink[],
+  userId = LOCAL_USER_ID,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(mrIssueLinks)
+      .where(and(eq(mrIssueLinks.profileId, profileId), eq(mrIssueLinks.mrKey, key)));
+    if (links.length > 0) {
+      await tx
+        .insert(mrIssueLinks)
+        .values(links.map((l) => ({ userId, profileId, mrKey: key, ...l })));
+    }
+  });
 }
 
 // ------------------------------------------------------------------ reads

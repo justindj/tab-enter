@@ -44,3 +44,26 @@ export function linkMergeRequest(
 
   return [...links].map(([issueKey, source]) => ({ issueKey, source }));
 }
+
+/**
+ * The manual override needed so an MR/issue pair ends up linked (or not).
+ * Only a difference from what the rules find is stored: re-linking a key the
+ * rules found just removes the "unlink" override, so later syncs keep working.
+ */
+export function manualOverrideFor(
+  mr: Pick<MergeRequest, 'sourceBranch' | 'title' | 'description'>,
+  issueKey: string,
+  linked: boolean,
+  keyRegex: string,
+): 'link' | 'unlink' | null {
+  const found = [mr.sourceBranch, mr.title, mr.description].some((text) =>
+    extractIssueKeys(text, keyRegex).includes(issueKey),
+  );
+  if (linked) return found ? null : 'link';
+  return found ? 'unlink' : null;
+}
+
+/** True when `key` is a whole issue key under the profile's pattern. */
+export function isIssueKey(key: string, keyRegex: string): boolean {
+  return new RegExp(`^(?:${keyRegex})$`).test(key);
+}

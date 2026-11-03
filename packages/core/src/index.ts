@@ -7,3 +7,4 @@ export * from './jobs';
 export * from './interfaces';
 export * from './workspace';
 export * from './connections';
+export * from './active-work';

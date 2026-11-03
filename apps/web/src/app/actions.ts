@@ -2,6 +2,7 @@
 
 import { createGitLabHost, createJiraTracker } from '@tab-enter/connectors';
 import {
+  isIssueKey,
   parseProfileSettings,
   parseWatchedProjects,
   redactSecrets,
@@ -9,6 +10,7 @@ import {
 } from '@tab-enter/core';
 import {
   addSecretName,
+  changeManualLink,
   createProfile,
   deleteProfileRows,
   enqueueJob,
@@ -183,6 +185,29 @@ export async function saveConnectionsAction(
   }
   revalidatePath('/', 'layout');
   return { ok: 'Saved. Syncing now.' };
+}
+
+/**
+ * Manually link or unlink one of my MRs and a ticket on the active profile.
+ * Overrides the branch/title/description rules and survives later syncs.
+ */
+export async function setMRLinkAction(
+  mrKey: string,
+  issueKey: string,
+  linked: boolean,
+): Promise<ActionResult> {
+  const db = await getDb();
+  const profile = await getActiveProfile(db);
+  if (!profile) return { error: 'No active profile.' };
+  const key = issueKey.trim().toUpperCase();
+  const { keyRegex } = profile.settings;
+  if (!isIssueKey(key, keyRegex)) {
+    return { error: `“${issueKey}” doesn’t look like a ticket key (pattern ${keyRegex}).` };
+  }
+  const found = await changeManualLink(db, profile.id, { mrKey, issueKey: key, linked }, keyRegex);
+  if (!found) return { error: 'That merge request is no longer in the synced data. Refresh.' };
+  revalidatePath('/', 'layout');
+  return { ok: linked ? `Linked to ${key}.` : `Unlinked from ${key}.` };
 }
 
 export interface ConnectionTestResult {

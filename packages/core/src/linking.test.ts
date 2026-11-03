@@ -1,8 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { extractIssueKeys, linkMergeRequest } from './linking';
+import { extractIssueKeys, isIssueKey, linkMergeRequest, manualOverrideFor } from './linking';
 import { DEFAULT_KEY_REGEX } from './settings';
 
 const ref = { projectId: '7', iid: 3 };
+
+describe('manualOverrideFor', () => {
+  const mr = { sourceBranch: 'feature/ABC-1-x', title: 'Fix', description: 'See DEF-2' };
+  it('stores only differences from the rules', () => {
+    expect(manualOverrideFor(mr, 'ABC-1', false, DEFAULT_KEY_REGEX)).toBe('unlink');
+    expect(manualOverrideFor(mr, 'ABC-1', true, DEFAULT_KEY_REGEX)).toBeNull();
+    expect(manualOverrideFor(mr, 'DEF-2', false, DEFAULT_KEY_REGEX)).toBe('unlink');
+    expect(manualOverrideFor(mr, 'XYZ-9', true, DEFAULT_KEY_REGEX)).toBe('link');
+    expect(manualOverrideFor(mr, 'XYZ-9', false, DEFAULT_KEY_REGEX)).toBeNull();
+  });
+
+  it('validates whole keys', () => {
+    expect(isIssueKey('ABC-12', DEFAULT_KEY_REGEX)).toBe(true);
+    expect(isIssueKey('ABC-12 ', DEFAULT_KEY_REGEX)).toBe(false);
+    expect(isIssueKey('abc-12', DEFAULT_KEY_REGEX)).toBe(false);
+  });
+});
 
 describe('extractIssueKeys', () => {
   it('finds keys in branch names', () => {

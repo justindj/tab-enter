@@ -226,6 +226,31 @@ Checked against docs.gitlab.com on 2026-11-02.
   deleted). `sync_state.cursor` stays reserved.
 - **Saving connections queues a sync** so new settings take effect at once.
 
+## Active Work page (M2)
+
+- **Filtering, sorting and grouping run in the browser**, over data the server page loads from
+  SQLite. One developer's tickets are at most a few hundred rows, so every filter change is
+  instant and needs no round trip. The logic is plain functions in `packages/core/active-work.ts`
+  and is unit-tested.
+- **View choices are remembered per profile in localStorage**: layout (by status / table), sort,
+  scope and filters. These are per-browser preferences, not profile settings. The search box is
+  remembered too, so a reload doesn't lose your place. Esc or Clear resets the filters.
+- **Status columns** follow the category order (To Do, then In Progress), then the order in which
+  each status first appears in rank order. Jira's real column order lives in board configuration
+  that tab-enter doesn't fetch. This approximates it well enough for typical workflows.
+- **"Has an MR" counts open MRs only.** A ticket whose only MR is merged is shown as "No MR". It
+  usually needs a follow-up, or its status needs moving. Merged MRs still show when the ticket is
+  expanded.
+- **Priority order** covers both of Jira's default schemes (Highest…Lowest and
+  Blocker…Trivial). Custom names sort with Medium, and "no priority" goes last.
+- **Manual links store only the difference from the rules.**
+  - Unlinking a key the rules found stores an `unlink`. Linking a key no rule finds stores a
+    `link`.
+  - Reversing either deletes the override instead of storing the opposite. Later syncs (for
+    example after a branch rename) keep working, and "Restore" brings back the automatic link.
+  - A change recomputes that MR's links at once, in SQLite only, without waiting for a sync.
+- **Claude Code runs per ticket** have a placeholder in the expanded row until M3.
+
 ## Worker
 
 - **Jobs run one at a time in M0.** In M3, agent runs get their own pool limited by

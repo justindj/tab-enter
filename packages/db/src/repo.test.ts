@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Db } from './client';
 import {
   addSecretName,
+  changeManualLink,
   claimNextJob,
   createProfile,
   deleteProfileRows,
@@ -14,6 +15,7 @@ import {
   hasPendingJob,
   listIssues,
   listLinks,
+  listManualLinks,
   listMergeRequests,
   listProfiles,
   recordSync,
@@ -139,6 +141,43 @@ describe('synced data', () => {
     expect((await listIssues(db, p)).map((i) => i.key)).toEqual(['ABC-1']);
     expect(await listMergeRequests(db, p)).toEqual([]);
     expect(await listLinks(db, p)).toEqual([]);
+  });
+
+  it('applies manual link changes immediately and stores only overrides', async () => {
+    const p = await createProfile(db, { name: 'P' });
+    const regex = '[A-Z][A-Z0-9]+-\\d+';
+    await replaceSyncedData(db, p, {
+      issues: [issue('ABC-1'), issue('ABC-9')],
+      mergeRequests: [{ mr: mr(1), isMine: true, isReviewer: false, needsMyReview: false }],
+      links: [{ mrKey: '42!1', links: [{ issueKey: 'ABC-1', source: 'branch' }] }],
+    });
+    const linksOf = async () =>
+      (await listLinks(db, p)).map((l) => `${l.issueKey}:${l.source}`).sort();
+
+    // Unlink the branch match: stored as an "unlink" override.
+    await changeManualLink(db, p, { mrKey: '42!1', issueKey: 'ABC-1', linked: false }, regex);
+    expect(await linksOf()).toEqual([]);
+    expect(await listManualLinks(db, p)).toEqual([
+      { mrKey: '42!1', issueKey: 'ABC-1', action: 'unlink' },
+    ]);
+
+    // Link a key no rule finds: stored as a "link" override.
+    await changeManualLink(db, p, { mrKey: '42!1', issueKey: 'ABC-9', linked: true }, regex);
+    expect(await linksOf()).toEqual(['ABC-9:manual']);
+
+    // Re-link the branch match: the override is removed, the rule takes over again.
+    await changeManualLink(db, p, { mrKey: '42!1', issueKey: 'ABC-1', linked: true }, regex);
+    expect(await linksOf()).toEqual(['ABC-1:branch', 'ABC-9:manual']);
+    expect(await listManualLinks(db, p)).toEqual([
+      { mrKey: '42!1', issueKey: 'ABC-9', action: 'link' },
+    ]);
+
+    // Unlink the manual link: nothing left to store.
+    await changeManualLink(db, p, { mrKey: '42!1', issueKey: 'ABC-9', linked: false }, regex);
+    expect(await listManualLinks(db, p)).toEqual([]);
+    expect(
+      await changeManualLink(db, p, { mrKey: '42!404', issueKey: 'ABC-1', linked: true }, regex),
+    ).toBe(false);
   });
 
   it('records sync success and failure', async () => {
