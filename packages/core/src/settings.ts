@@ -87,11 +87,12 @@ export const DEFAULT_PRESETS: Record<PresetId, TaskPreset> = {
   'verification-script': {
     label: 'Verification script',
     model: 'sonnet',
-    // {{artifactsDir}} is substituted at run time so Write is limited to the run's artifacts folder.
-    allowedTools: ['Read', 'Grep', 'Glob', 'Write({{artifactsDir}}/**)', 'Bash(npx playwright:*)'],
-    disallowedTools: ['Edit'],
-    permissionMode: 'acceptEdits',
-    maxTurns: 30,
+    // Claude only reads the code and replies with JSON walkthrough steps;
+    // tab-enter's own Playwright runner executes them (see docs/decisions.md).
+    allowedTools: ['Read', 'Grep', 'Glob'],
+    disallowedTools: ['Edit', 'Write', 'NotebookEdit', 'Bash'],
+    permissionMode: 'dontAsk',
+    maxTurns: 20,
     mode: 'analysis',
   },
   'short-text': {
@@ -106,7 +107,9 @@ export const DEFAULT_PRESETS: Record<PresetId, TaskPreset> = {
 };
 
 const VerificationProjectSchema = z.object({
+  /** Run in the worktree to start the app (e.g. "pnpm dev"); omit when baseUrl is already up. */
   startCommand: z.string().optional(),
+  /** The test or local URL walkthroughs may visit. Nothing outside its origin is opened. */
   baseUrl: z.string().optional(),
   /** Name of a keychain entry holding test-user credentials. Never the credentials themselves. */
   testCredentialsSecret: z.string().optional(),
@@ -269,5 +272,12 @@ export function formatWatchedProjects(projects: WatchedProject[]): string {
 
 /** Parse stored settings, filling in defaults for fields added since they were saved. */
 export function parseProfileSettings(raw: unknown): ProfileSettings {
-  return ProfileSettingsSchema.parse(raw ?? {});
+  const settings = ProfileSettingsSchema.parse(raw ?? {});
+  // M3–M5 stored a verification preset that let Claude write files and run
+  // Playwright; since M6 Claude only returns JSON steps. Upgrade that old default.
+  const verify = settings.claude.presets['verification-script'];
+  if (verify.allowedTools.includes('Bash(npx playwright:*)')) {
+    settings.claude.presets['verification-script'] = DEFAULT_PRESETS['verification-script'];
+  }
+  return settings;
 }

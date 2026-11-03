@@ -22,6 +22,7 @@ import {
 } from '@/app/actions';
 import { Button } from '@/components/ui/button';
 import { Checkbox, Field, Input, Select } from '@/components/ui/field';
+import { saveVerificationSettingsAction } from '@/app/verification/actions';
 
 function Result({ state }: { state: ActionResult }) {
   if (state.error)
@@ -287,6 +288,88 @@ export function TemplatesForm(props: {
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={pending}>
           Save templates
+        </Button>
+        <Result state={state} />
+      </div>
+    </form>
+  );
+}
+
+export function VerificationSettingsForm(props: {
+  profileId: string;
+  captureVideo: boolean;
+  projects: {
+    label: string;
+    baseUrl: string;
+    startCommand: string;
+    hasCredentials: boolean;
+    hasClone: boolean;
+  }[];
+}) {
+  const [state, action, pending] = useActionState(saveVerificationSettingsAction, {});
+  return (
+    <form action={action} className="grid gap-5">
+      <input type="hidden" name="profileId" value={props.profileId} />
+      {props.projects.map((p, i) => (
+        <fieldset key={p.label} className="grid gap-3">
+          <legend className="mb-1 text-sm font-semibold">{p.label}</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field
+              label="Test URL"
+              hint="Local or test environment only. Walkthroughs never leave this origin."
+            >
+              <Input
+                name={`p${i}.baseUrl`}
+                type="url"
+                defaultValue={p.baseUrl}
+                placeholder="http://localhost:3000"
+              />
+            </Field>
+            <Field
+              label="Start command (optional)"
+              hint={
+                p.hasClone
+                  ? 'Runs in the ticket’s worktree until the test URL answers, then is stopped. Leave empty if the app is already running.'
+                  : 'Needs a local clone path for this project (Connections → Watched projects).'
+              }
+            >
+              <Input
+                name={`p${i}.startCommand`}
+                defaultValue={p.startCommand}
+                placeholder="pnpm install && pnpm dev"
+                className="font-mono text-xs"
+              />
+            </Field>
+            <Field label="Test username" hint="A test account only, never a real person’s.">
+              <Input
+                name={`p${i}.username`}
+                autoComplete="off"
+                placeholder={p.hasCredentials ? '(stored; leave blank to keep)' : ''}
+              />
+            </Field>
+            <Field
+              label="Test password"
+              hint="Stored in your keychain and filled by tab-enter; never sent to Claude."
+            >
+              <Input
+                name={`p${i}.password`}
+                type="password"
+                autoComplete="off"
+                placeholder={p.hasCredentials ? '••••••••' : ''}
+              />
+            </Field>
+          </div>
+        </fieldset>
+      ))}
+      <Checkbox
+        name="captureVideo"
+        defaultChecked={props.captureVideo}
+        label="Record video of walkthroughs"
+        hint="Off by default: screenshots are smaller and faster."
+      />
+      <div className="flex items-center gap-3">
+        <Button type="submit" disabled={pending}>
+          Save
         </Button>
         <Result state={state} />
       </div>

@@ -384,6 +384,78 @@ Checked against docs.gitlab.com on 2026-11-02.
 - **Approving stays a human click in GitLab.** The verdict is a recommendation only. Posting
   comments and approving from tab-enter are M7, behind settings and a confirmation.
 
+## Verification (M6)
+
+- **Walkthroughs are data, not code.** The spec suggested Claude writing Playwright scripts and
+  running `npx playwright`. Instead:
+  - **What Claude does:** the `verification-script` preset is read-only (Read, Grep, Glob,
+    `dontAsk`). Claude reads the code and replies with a JSON list of steps: goto, click, fill,
+    press, expectText, expectVisible, screenshot, wait. The steps are validated with zod, and
+    unknown actions are rejected.
+  - **What tab-enter does:** runs the steps with Playwright's library itself.
+  - **Why:**
+    - No generated code is ever executed.
+    - The tools Claude needs stay minimal.
+    - The saved script is a reviewable JSON file that re-runs with no AI cost.
+  - **Upgrade:** stored presets from M3–M5, which allowed Write and Bash, are upgraded to the
+    read-only one when settings load.
+- **Browser:** `playwright-core` drives the user's installed **Edge or Chrome** (headless), then
+  Playwright's bundled Chromium if present. There's no browser download in `pnpm install`. Checked
+  on this machine: Edge 156 and Chrome 156 both launch.
+- **Walkthroughs stay on the configured test origin.**
+  - **Navigation:** `goto` paths resolve against the project's test URL, and any other origin is
+    refused.
+  - **Requests:** every request to another origin (analytics, CDNs, third parties) is aborted.
+    Client content can't leak, and a test environment can't call production.
+- **Credentials:**
+  - **Storage:** each project's test username and password are one keychain entry
+    (`test-credentials:<project>`).
+  - **Placeholders:** Claude only ever sees `{{TEST_USER}}` / `{{TEST_PASSWORD}}`, and the runner
+    substitutes them when filling a field.
+  - **The slideshow** shows password fills as `••••`.
+  - **Tested:** a real-browser test checks that the password reaches the app but not the prompt or
+    the slideshow.
+- **The app under test:**
+  - With a start command, the app is started in a worktree, and tab-enter waits up to 120 s for
+    the URL to answer. Afterwards the whole process tree is stopped (`taskkill /t` on Windows, the
+    process group elsewhere).
+  - An open MR runs its source branch.
+  - A merged ticket runs a **detached** worktree at `origin/<target>`, so no local branch is
+    involved and the user's checkout is never touched.
+  - With no start command, the test URL is assumed to be running already.
+- **Changed files come from GitLab's MR diff**, which works for open and merged MRs (a merged
+  branch is often deleted). A simple classifier decides "UI" (tsx/vue/svelte/css/html, pages and
+  components folders) and "test" files. In Auto mode, UI files mean a walkthrough; otherwise it's
+  test evidence. The user can force either mode. The spec's "configurable mapping" of backend
+  changes to UI pages isn't done; forcing UI mode covers it for now.
+- **Assessment:** Claude (`short-text`, JSON) marks each acceptance criterion verified, partial or
+  not verified, from the walkthrough results, pipeline status and changed tests.
+  - **Without Claude** (not approved, or the demo), the assessment is evidence-only, labelled as
+    such, and never says "verified".
+  - **Outcome:**
+    - **Passed:** every criterion is verified and nothing failed.
+    - **Needs coverage:** a backend change with no changed tests.
+    - **Issues found:** anything else.
+  - **Retries:** each Claude call is an ordinary run (on the Runs page, with cost), retried once
+    in the same session if the JSON is invalid.
+- **The slideshow is one self-contained HTML file.** Screenshots are embedded as data URIs and
+  there are no external resources.
+  - **Navigation:** arrow keys. Print CSS puts one slide per page for "Save as PDF".
+  - **Viewing in the app:** it's served with a CSP that allows only inline styles and scripts and
+    `data:` images, inside a sandboxed iframe.
+  - **Storage:** it lives in the BlobStore under the profile's folder, so deleting the profile
+    removes it.
+  - **Web access:** reading the BlobStore from the web app is the second exception to "web only
+    touches SQLite", like the secret store. It's storage behind an interface that becomes object
+    storage when hosted.
+- **Not done yet:**
+  - "Before" screenshots, which need the pre-change build.
+  - Coverage deltas: GitLab has `head_pipeline.coverage`, which isn't synced yet.
+  - Running a Playwright spec that already exists in the client repo.
+  - Posting the summary to the MR (M7).
+- **Verification jobs run in the same pool as Claude runs** (`maxParallelRuns` per profile), so a
+  long walkthrough never blocks syncs.
+
 ## Worker
 
 - **Non-run jobs run one at a time.** Since M3, agent runs have their own pool limited by

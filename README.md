@@ -44,8 +44,8 @@ fixtures/         Invented demo data and recorded Claude Code output
 | M3 Claude Code runner + Now | Done (real runs not yet tried: no logged-in CLI on PATH)    |
 | M4 Communication page       | Done                                                        |
 | M5 Code Review page         | Done                                                        |
-| M6 Verification             | Next                                                        |
-| M7 Gated write actions      | Planned (see spec)                                          |
+| M6 Verification             | Done                                                        |
+| M7 Gated write actions      | Next                                                        |
 
 ## License
 

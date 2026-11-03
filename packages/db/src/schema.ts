@@ -224,7 +224,7 @@ export const runEvents = sqliteTable(
 );
 
 export type VerificationStatus =
-  'not_run' | 'running' | 'passed' | 'issues_found' | 'needs_coverage';
+  'not_run' | 'running' | 'passed' | 'issues_found' | 'needs_coverage' | 'failed';
 
 export const verificationArtifacts = sqliteTable(
   'verification_artifacts',
@@ -244,7 +244,12 @@ export const verificationArtifacts = sqliteTable(
     >(),
     summary: text('summary'),
     runId: text('run_id'),
+    /** ui = Playwright walkthrough; backend = test evidence only. */
+    mode: text('mode').$type<'ui' | 'backend'>(),
+    /** What went wrong when the job itself failed (not the checks). */
+    error: text('error'),
     createdAt: ts('created_at').notNull(),
+    finishedAt: ts('finished_at'),
   },
   (t) => [index('verif_issue_idx').on(t.profileId, t.issueKey)],
 );

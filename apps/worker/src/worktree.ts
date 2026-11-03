@@ -60,6 +60,40 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
+/**
+ * A detached worktree at `origin/<branch>` (e.g. to verify merged work on
+ * main), refreshed to the latest remote commit on every call. Never touches
+ * a local branch, so it works even when the user's clone has that branch out.
+ */
+export async function ensureDetachedWorktree(
+  run: RunCommand,
+  gitPath: string,
+  req: { clonePath: string; key: string; remoteBranch: string },
+): Promise<Worktree> {
+  const warnings: string[] = [];
+  const git = (cwd: string, args: string[], timeoutMs = 60_000) =>
+    run(gitPath, ['-C', cwd, ...args], { timeoutMs });
+  if (!SAFE_REF.test(req.remoteBranch)) {
+    throw new WorktreeError(`Refusing an unusual branch name: ${req.remoteBranch}`);
+  }
+  if ((await git(req.clonePath, ['rev-parse', '--show-toplevel'])).code !== 0) {
+    throw new WorktreeError(`${req.clonePath} is not a git repository.`);
+  }
+  const fetch = await git(req.clonePath, ['fetch', '--quiet', 'origin', req.remoteBranch], 120_000);
+  if (fetch.code !== 0)
+    warnings.push(`git fetch failed, using local refs: ${fetch.stderr.trim().slice(0, 300)}`);
+  const ref = `origin/${req.remoteBranch}`;
+  const dir = worktreePath(req.clonePath, req.key);
+  const result = (await exists(dir))
+    ? await git(dir, ['checkout', '--quiet', '--detach', ref])
+    : (await mkdir(path.dirname(dir), { recursive: true }),
+      await git(req.clonePath, ['worktree', 'add', '--detach', dir, ref]));
+  if (result.code !== 0) {
+    throw new WorktreeError(`Could not check out ${ref}: ${result.stderr.trim().slice(0, 400)}`);
+  }
+  return { cwd: dir, branch: ref, warnings };
+}
+
 export async function ensureWorktree(
   run: RunCommand,
   gitPath: string,

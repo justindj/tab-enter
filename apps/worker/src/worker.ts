@@ -1,9 +1,16 @@
-import { JobSchema, redactSecrets, type CredentialProvider, type Job } from '@tab-enter/core';
 import type { FetchLike } from '@tab-enter/connectors';
+import {
+  JobSchema,
+  redactSecrets,
+  type CredentialProvider,
+  type Job,
+  type JobType,
+} from '@tab-enter/core';
 import {
   claimNextJob,
   enqueueJob,
   finishJob,
+  getDataDir,
   getSyncStates,
   hasPendingJob,
   listProfiles,
@@ -15,6 +22,9 @@ import { deleteProfileFiles } from './handlers/delete-profile-files';
 import { detectTools } from './handlers/detect-tools';
 import { openTerminal, type OpenTerminalDeps } from './handlers/open-terminal';
 import { syncProfile } from './handlers/sync';
+import { executeVerification, type VerifyDeps } from './handlers/verify';
+import { FileBlobStore } from '@tab-enter/db/blob-store';
+import type { SecretStore } from '@tab-enter/secrets';
 
 export interface WorkerDeps {
   fixturesDir: string;
@@ -22,10 +32,16 @@ export interface WorkerDeps {
   credentials?: CredentialProvider;
   fetch?: FetchLike;
   log?: (message: string) => void;
-  /** Overrides for agent runs and terminals (tests). */
+  /** Read-only access to the keychain, for verification test credentials. */
+  secrets?: Pick<SecretStore, 'get'>;
+  /** Overrides for agent runs, terminals and verification (tests). */
   run?: Omit<AgentRunDeps, 'fixturesDir'>;
   terminal?: OpenTerminalDeps;
+  verify?: Partial<Omit<VerifyDeps, 'fixturesDir'>>;
 }
+
+/** Long jobs that run in the pool beside syncs. */
+const POOLED: JobType[] = ['agent-run', 'verify'];
 
 async function dispatch(db: Db, job: Job, deps: WorkerDeps): Promise<void> {
   switch (job.type) {
@@ -43,6 +59,16 @@ async function dispatch(db: Db, job: Job, deps: WorkerDeps): Promise<void> {
       return executeRun(db, job.runId, { fixturesDir: deps.fixturesDir, ...deps.run });
     case 'open-terminal':
       return openTerminal(db, job, deps.terminal);
+    case 'verify':
+      return executeVerification(db, job, {
+        fixturesDir: deps.fixturesDir,
+        blobs: new FileBlobStore(getDataDir()),
+        credentials: deps.credentials,
+        secrets: deps.secrets,
+        fetch: deps.fetch,
+        runner: deps.run?.runner,
+        ...deps.verify,
+      });
   }
 }
 
@@ -79,7 +105,7 @@ export async function startNextJob(
 export async function processNextJob(
   db: Db,
   deps: WorkerDeps,
-  filter: ClaimFilter = { excludeTypes: ['agent-run'] },
+  filter: ClaimFilter = { excludeTypes: POOLED },
 ): Promise<boolean> {
   const started = await startNextJob(db, deps, filter);
   if (!started) return false;
@@ -114,7 +140,7 @@ export class RunPool {
         .filter(([id, n]) => n >= (limits.get(id) ?? 2))
         .map(([id]) => id);
       const started = await startNextJob(this.db, this.deps, {
-        types: ['agent-run'],
+        types: POOLED,
         excludeProfileIds: full,
       });
       if (!started) return;

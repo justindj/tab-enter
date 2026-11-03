@@ -75,6 +75,27 @@ it turns red with the reason.
 Runs can commit locally but never push. Pushing and opening MRs are separate, confirmed actions
 (M7). In the Demo profile, runs replay recorded output and cost nothing.
 
+## Verify completed tickets
+
+1. Have **Microsoft Edge or Google Chrome** installed. Playwright drives it headless; nothing is
+   downloaded. Without either, run `npx playwright install chromium` once.
+2. In Settings → **Verification**, for each project set:
+   - **Test URL:** a local or test environment, e.g. `http://localhost:3000`. Walkthroughs never
+     open anything else.
+   - **Start command** (optional): e.g. `pnpm install && pnpm dev`. It runs in a worktree until
+     the URL answers. Leave it empty if the app is already running.
+   - **Test username and password** (optional): a test account. They go to your keychain and are
+     filled in by tab-enter, never sent to Claude.
+3. On the **Verification** page, click **Verify** on a completed ticket (or one with an approved
+   MR).
+   - **Auto** picks a UI walkthrough when UI files changed, otherwise test evidence.
+   - **Re-run walkthrough** repeats the saved steps with no AI cost.
+   - **View slideshow** opens the result. **Download HTML** saves it for offline viewing or
+     printing to PDF.
+
+UI walkthroughs need Claude Code approved for the client, since Claude writes the steps. Backend
+verification and re-runs work without it, but criteria are then marked from evidence only.
+
 ## Environment variables
 
 | Variable               | Default                    | Purpose                                                             |

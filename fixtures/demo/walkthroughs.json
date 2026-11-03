@@ -1,0 +1,29 @@
+{
+  "_comment": "Invented demo walkthroughs (the JSON step format Claude writes). Demo runs simulate them; no app is opened.",
+  "SHOP-099": {
+    "title": "Password reset link lasts 60 minutes",
+    "steps": [
+      { "action": "goto", "path": "/forgot-password" },
+      { "action": "fill", "selector": "input[name=email]", "value": "{{TEST_USER}}" },
+      { "action": "click", "text": "Send reset link" },
+      { "action": "screenshot", "caption": "Reset link requested" },
+      { "action": "goto", "path": "/reset?token=demo-55-minutes-old" },
+      { "action": "expectVisible", "selector": "input[name=new-password]" },
+      { "action": "screenshot", "caption": "A 55-minute-old link still opens the reset form" },
+      { "action": "goto", "path": "/reset?token=demo-61-minutes-old" },
+      { "action": "expectText", "text": "This link has expired" },
+      { "action": "screenshot", "caption": "A 61-minute-old link is rejected" }
+    ]
+  },
+  "SHOP-110": {
+    "title": "Stock badges on product cards",
+    "steps": [
+      { "action": "goto", "path": "/products" },
+      { "action": "expectText", "text": "In stock" },
+      { "action": "screenshot", "caption": "Products show an In stock badge" },
+      { "action": "goto", "path": "/products?filter=low-stock" },
+      { "action": "expectText", "text": "Only 3 left" },
+      { "action": "screenshot", "caption": "Low stock shows how many are left" }
+    ]
+  }
+}

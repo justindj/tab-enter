@@ -15,6 +15,7 @@ import {
   DeleteProfileButton,
   MessageSettingsForm,
   TemplatesForm,
+  VerificationSettingsForm,
 } from './forms';
 
 function ToolRow({
@@ -250,6 +251,39 @@ export default async function SettingsPage() {
           description="Tokens and cost as Claude Code reported them, last 7 days, this profile."
         />
         <UsagePanel usage={usage} presets={s.claude.presets} />
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Verification"
+          description={
+            active.isDemo
+              ? 'The demo simulates walkthroughs; create a profile to verify a real app.'
+              : 'Where each project’s app runs for browser walkthroughs (Playwright drives your installed Edge or Chrome).'
+          }
+        />
+        {!active.isDemo && (
+          <CardBody>
+            {s.gitlab.projects.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Add watched projects under Connections first.
+              </p>
+            ) : (
+              <VerificationSettingsForm
+                key={active.id}
+                profileId={active.id}
+                captureVideo={s.verification.captureVideo}
+                projects={s.gitlab.projects.map((p) => ({
+                  label: p.path || p.id,
+                  baseUrl: p.verification.baseUrl ?? '',
+                  startCommand: p.verification.startCommand ?? '',
+                  hasCredentials: !!p.verification.testCredentialsSecret,
+                  hasClone: !!p.localPath,
+                }))}
+              />
+            )}
+          </CardBody>
+        )}
       </Card>
 
       <Card>

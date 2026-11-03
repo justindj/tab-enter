@@ -525,6 +525,75 @@ export async function listLinks(db: Db, profileId: string) {
     .where(eq(mrIssueLinks.profileId, profileId));
 }
 
+// ----------------------------------------------------------- verification
+
+export type VerificationRow = typeof verificationArtifacts.$inferSelect;
+
+/** A "running" verification row; the worker job fills in the rest. */
+export async function createVerification(
+  db: Db,
+  v: { profileId: string; issueKey: string; mrKey: string | null },
+  userId = LOCAL_USER_ID,
+): Promise<string> {
+  const id = randomUUID();
+  await db.insert(verificationArtifacts).values({
+    id,
+    userId,
+    profileId: v.profileId,
+    issueKey: v.issueKey,
+    mrKey: v.mrKey,
+    status: 'running',
+    createdAt: new Date(),
+  });
+  return id;
+}
+
+export async function getVerification(db: Db, id: string): Promise<VerificationRow | null> {
+  const [row] = await db
+    .select()
+    .from(verificationArtifacts)
+    .where(eq(verificationArtifacts.id, id));
+  return row ?? null;
+}
+
+export async function updateVerification(
+  db: Db,
+  id: string,
+  patch: Partial<Omit<VerificationRow, 'id' | 'userId' | 'profileId'>>,
+): Promise<void> {
+  await db.update(verificationArtifacts).set(patch).where(eq(verificationArtifacts.id, id));
+}
+
+/** Newest first; optionally for one ticket. */
+export async function listVerifications(
+  db: Db,
+  profileId: string,
+  issueKeyFilter?: string,
+): Promise<VerificationRow[]> {
+  return db
+    .select()
+    .from(verificationArtifacts)
+    .where(
+      and(
+        eq(verificationArtifacts.profileId, profileId),
+        issueKeyFilter ? eq(verificationArtifacts.issueKey, issueKeyFilter) : undefined,
+      ),
+    )
+    .orderBy(desc(verificationArtifacts.createdAt));
+}
+
+/** Verifications left "running" by a worker that died. */
+export async function failOrphanedVerifications(db: Db): Promise<void> {
+  await db
+    .update(verificationArtifacts)
+    .set({
+      status: 'failed',
+      error: 'The worker stopped during verification. Run it again.',
+      finishedAt: new Date(),
+    })
+    .where(eq(verificationArtifacts.status, 'running'));
+}
+
 // ----------------------------------------------------------- code reviews
 
 export type CodeReviewRow = Omit<typeof codeReviews.$inferSelect, 'result'> & {
@@ -693,8 +762,16 @@ export interface NewRun {
   parentRunId?: string | null;
 }
 
-/** Insert a queued run and the job that executes it. */
-export async function createRun(db: Db, run: NewRun, userId = LOCAL_USER_ID): Promise<string> {
+/**
+ * Insert a queued run and the job that executes it. With `enqueue: false` the
+ * caller (a worker job such as verification) executes the run itself.
+ */
+export async function createRun(
+  db: Db,
+  run: NewRun,
+  userId = LOCAL_USER_ID,
+  { enqueue = true }: { enqueue?: boolean } = {},
+): Promise<string> {
   const id = randomUUID();
   const parent = run.parentRunId ? await getRun(db, run.parentRunId) : null;
   await db.insert(agentRuns).values({
@@ -714,7 +791,9 @@ export async function createRun(db: Db, run: NewRun, userId = LOCAL_USER_ID): Pr
     status: 'queued',
     createdAt: new Date(),
   });
-  await enqueueJob(db, { type: 'agent-run', profileId: run.profileId, runId: id }, { userId });
+  if (enqueue) {
+    await enqueueJob(db, { type: 'agent-run', profileId: run.profileId, runId: id }, { userId });
+  }
   return id;
 }
 

@@ -3,6 +3,7 @@ import {
   enqueueJob,
   ensureDemoProfile,
   failOrphanedRuns,
+  failOrphanedVerifications,
   getDataDir,
   getDb,
   getProfile,
@@ -26,6 +27,7 @@ async function main() {
   const db = await getDb();
   await runMigrations(db);
   await ensureDemoProfile(db);
+  await failOrphanedVerifications(db);
   const orphaned = await failOrphanedRuns(db);
   if (orphaned > 0) log(`marked ${orphaned} interrupted run(s) as failed`);
   await requeueStaleJobs(db, new Date(Date.now() - STALE_LOCK_MS));
@@ -53,7 +55,7 @@ async function main() {
     async (profileId) => (await getProfile(db, profileId))?.settings ?? defaultProfileSettings(),
   );
 
-  const deps = { fixturesDir: getFixturesDir(), credentials, log };
+  const deps = { fixturesDir: getFixturesDir(), credentials, secrets: lazyStore, log };
   let stopping = false;
   const stop = () => {
     stopping = true;

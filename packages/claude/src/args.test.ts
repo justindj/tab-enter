@@ -68,7 +68,10 @@ describe('buildClaudeArgs', () => {
   });
 
   it('substitutes placeholders and fails loudly when one is missing', () => {
-    const preset = DEFAULT_PRESETS['verification-script'];
+    const preset = {
+      ...DEFAULT_PRESETS['verification-script'],
+      allowedTools: ['Read', 'Write({{artifactsDir}}/**)'],
+    };
     const args = buildClaudeArgs({ preset, vars: { artifactsDir: '/data/p1/artifacts/run1' } });
     expect(flagValues(args, '--allowedTools')).toContain('Write(/data/p1/artifacts/run1/**)');
     expect(() => buildClaudeArgs({ preset })).toThrow(/artifactsDir/);
