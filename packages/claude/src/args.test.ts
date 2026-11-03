@@ -40,6 +40,15 @@ describe('buildClaudeArgs', () => {
     expect(flagValues(args, '--output-format')).toEqual(['json']);
     expect(args).not.toContain('--verbose');
     expect(flagValues(args, '--allowedTools')).toEqual(['Read', 'Grep', 'Glob']);
+    expect(flagValues(args, '--permission-mode')).toEqual(['dontAsk']);
+  });
+
+  it('denies anything that would prompt, since runs are headless', () => {
+    for (const preset of Object.values(DEFAULT_PRESETS)) {
+      expect(flagValues(buildClaudeArgs({ preset, vars }), '--permission-prompts')).toEqual([
+        'none',
+      ]);
+    }
   });
 
   it('omits --allowedTools when a preset allows none', () => {

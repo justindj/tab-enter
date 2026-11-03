@@ -51,6 +51,8 @@ export function buildClaudeArgs(input: BuildArgsInput): string[] {
   if (preset.mode === 'task') args.push('--verbose');
   args.push('--model', preset.model);
   args.push('--permission-mode', preset.permissionMode);
+  // Headless: nobody can answer a permission prompt, so anything not allowed is denied.
+  args.push('--permission-prompts', 'none');
   args.push('--max-turns', String(preset.maxTurns));
 
   const allowed = preset.allowedTools.map((t) => substitute(t, vars));

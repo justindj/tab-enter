@@ -8,7 +8,12 @@ const config: NextConfig = {
   poweredByHeader: false,
   // Don't write a generated AGENTS.md into the app folder.
   agentRules: false,
-  transpilePackages: ['@tab-enter/core', '@tab-enter/db', '@tab-enter/secrets'],
+  transpilePackages: [
+    '@tab-enter/connectors',
+    '@tab-enter/core',
+    '@tab-enter/db',
+    '@tab-enter/secrets',
+  ],
   // Native modules stay as runtime requires instead of being bundled.
   serverExternalPackages: ['@libsql/client', 'libsql', '@napi-rs/keyring'],
   outputFileTracingRoot: repoRoot,

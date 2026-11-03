@@ -4,8 +4,11 @@ import path from 'node:path';
 import type { ToolStatus } from '@tab-enter/core';
 import { findOnPath, runCommand, type CommandResult, type RunCommand } from './exec';
 
-/** Oldest Claude Code release tab-enter supports. Keep in sync with docs/setup.md. */
-export const CLAUDE_MIN_VERSION = '2.0.0';
+/**
+ * Oldest Claude Code release tab-enter supports. Flags were verified on 2.1.309;
+ * 2.1 is the line with `auth status`. Keep in sync with docs/setup.md.
+ */
+export const CLAUDE_MIN_VERSION = '2.1.0';
 /** `claude auth status` is only attempted from this version on (see docs/decisions.md). */
 export const CLAUDE_AUTH_STATUS_MIN_VERSION = '2.1.0';
 

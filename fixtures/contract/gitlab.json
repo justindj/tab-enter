@@ -1,0 +1,222 @@
+{
+  "_comment": "Invented GitLab REST v4 responses (shapes per docs.gitlab.com/api/merge_requests, merge_request_approvals, discussions). Used by packages/connectors/src/gitlab.test.ts.",
+  "user": { "id": 501, "username": "dana", "name": "Dana Developer" },
+  "createdOpenPages": [
+    [
+      {
+        "id": 9012,
+        "iid": 12,
+        "project_id": 42,
+        "title": "SHOP-101 Validate email addresses on login",
+        "description": "Closes SHOP-101",
+        "state": "opened",
+        "draft": false,
+        "source_branch": "feature/SHOP-101-email-validation",
+        "target_branch": "main",
+        "author": { "username": "dana" },
+        "reviewers": [{ "username": "riley" }],
+        "web_url": "https://gitlab.example.com/acme/shop/-/merge_requests/12",
+        "detailed_merge_status": "mergeable",
+        "has_conflicts": false,
+        "sha": "aaa111",
+        "references": { "full": "acme/shop!12" },
+        "created_at": "2026-05-29T10:00:00.000Z",
+        "updated_at": "2026-05-31T08:00:00.000Z",
+        "merged_at": null
+      }
+    ],
+    [
+      {
+        "id": 9077,
+        "iid": 3,
+        "project_id": 77,
+        "title": "Unwatched project MR",
+        "description": "",
+        "state": "opened",
+        "draft": true,
+        "source_branch": "chore/tidy",
+        "target_branch": "main",
+        "author": { "username": "dana" },
+        "reviewers": [],
+        "web_url": "https://gitlab.example.com/acme/other/-/merge_requests/3",
+        "detailed_merge_status": "draft_status",
+        "has_conflicts": false,
+        "sha": "ccc333",
+        "references": { "full": "acme/other!3" },
+        "created_at": "2026-05-29T10:00:00.000Z",
+        "updated_at": "2026-05-30T08:00:00.000Z",
+        "merged_at": null
+      }
+    ]
+  ],
+  "createdMerged": [
+    {
+      "id": 9011,
+      "iid": 11,
+      "project_id": 42,
+      "title": "SHOP-099 Fix password reset expiry",
+      "description": "",
+      "state": "merged",
+      "draft": false,
+      "source_branch": "fix/SHOP-099",
+      "target_branch": "main",
+      "author": { "username": "dana" },
+      "reviewers": [{ "username": "riley" }],
+      "web_url": "https://gitlab.example.com/acme/shop/-/merge_requests/11",
+      "detailed_merge_status": "not_open",
+      "has_conflicts": false,
+      "sha": "bbb222",
+      "references": { "full": "acme/shop!11" },
+      "created_at": "2026-05-28T10:00:00.000Z",
+      "updated_at": "2026-05-31T10:00:00.000Z",
+      "merged_at": "2026-05-31T10:00:00.000Z"
+    },
+    {
+      "id": 9005,
+      "iid": 5,
+      "project_id": 42,
+      "title": "Merged long ago, updated recently",
+      "description": "",
+      "state": "merged",
+      "draft": false,
+      "source_branch": "fix/old",
+      "target_branch": "main",
+      "author": { "username": "dana" },
+      "reviewers": [],
+      "web_url": "https://gitlab.example.com/acme/shop/-/merge_requests/5",
+      "detailed_merge_status": "not_open",
+      "has_conflicts": false,
+      "sha": "eee555",
+      "references": { "full": "acme/shop!5" },
+      "created_at": "2026-04-01T10:00:00.000Z",
+      "updated_at": "2026-05-31T10:00:00.000Z",
+      "merged_at": "2026-04-02T10:00:00.000Z"
+    }
+  ],
+  "reviewOpen": [
+    {
+      "id": 9021,
+      "iid": 21,
+      "project_id": 42,
+      "title": "SHOP-120 Add coupon codes",
+      "description": "",
+      "state": "opened",
+      "draft": false,
+      "source_branch": "feature/SHOP-120-coupons",
+      "target_branch": "main",
+      "author": { "username": "riley" },
+      "reviewers": [{ "username": "dana" }],
+      "web_url": "https://gitlab.example.com/acme/shop/-/merge_requests/21",
+      "detailed_merge_status": "not_approved",
+      "has_conflicts": false,
+      "sha": "ddd444",
+      "references": { "full": "acme/shop!21" },
+      "created_at": "2026-05-30T10:00:00.000Z",
+      "updated_at": "2026-05-31T07:00:00.000Z",
+      "merged_at": null
+    },
+    {
+      "id": 9022,
+      "iid": 22,
+      "project_id": 42,
+      "title": "SHOP-121 Already approved by me",
+      "description": "",
+      "state": "opened",
+      "draft": false,
+      "source_branch": "feature/SHOP-121",
+      "target_branch": "main",
+      "author": { "username": "riley" },
+      "reviewers": [{ "username": "dana" }],
+      "web_url": "https://gitlab.example.com/acme/shop/-/merge_requests/22",
+      "detailed_merge_status": "mergeable",
+      "has_conflicts": false,
+      "sha": "fff666",
+      "references": { "full": "acme/shop!22" },
+      "created_at": "2026-05-30T10:00:00.000Z",
+      "updated_at": "2026-05-31T07:00:00.000Z",
+      "merged_at": null
+    }
+  ],
+  "single": {
+    "42!12": {
+      "head_pipeline": { "id": 7001, "status": "failed" },
+      "detailed_merge_status": "requested_changes",
+      "has_conflicts": true,
+      "diff_refs": { "base_sha": "000", "head_sha": "aaa111", "start_sha": "000" }
+    },
+    "42!11": { "head_pipeline": { "id": 7000, "status": "success" } },
+    "42!21": { "head_pipeline": { "id": 7002, "status": "waiting_for_resource" } },
+    "42!22": { "head_pipeline": null }
+  },
+  "approvals": {
+    "42!12": { "approved": false, "approvals_required": 1, "approved_by": [] },
+    "42!11": {
+      "approved": true,
+      "approvals_required": 1,
+      "approved_by": [{ "user": { "username": "riley" } }]
+    },
+    "42!21": { "approved": false, "approved_by": [] },
+    "42!22": { "approved": true, "approved_by": [{ "user": { "username": "dana" } }] }
+  },
+  "discussions": {
+    "42!12": [
+      {
+        "id": "d1",
+        "individual_note": false,
+        "notes": [
+          {
+            "id": 1,
+            "body": "Please handle uppercase domains.",
+            "author": { "username": "riley" },
+            "created_at": "2026-05-30T09:00:00.000Z",
+            "system": false,
+            "resolvable": true,
+            "resolved": false,
+            "position": { "new_path": "src/login.ts", "new_line": 14 }
+          }
+        ]
+      },
+      {
+        "id": "d2",
+        "individual_note": false,
+        "notes": [
+          {
+            "id": 2,
+            "body": "Nit: rename this.",
+            "author": { "username": "riley" },
+            "created_at": "2026-05-30T09:05:00.000Z",
+            "system": false,
+            "resolvable": true,
+            "resolved": true
+          }
+        ]
+      },
+      {
+        "id": "d3",
+        "individual_note": true,
+        "notes": [
+          {
+            "id": 3,
+            "body": "added 1 commit",
+            "author": { "username": "dana" },
+            "created_at": "2026-05-30T10:00:00.000Z",
+            "system": true,
+            "resolvable": false
+          }
+        ]
+      }
+    ]
+  },
+  "diffs": {
+    "42!12": [
+      {
+        "old_path": "src/login.ts",
+        "new_path": "src/login.ts",
+        "diff": "@@ -10,3 +10,5 @@\n const a = 1;\n-const b = 2;\n+const b = 3;\n+const c = 4;\n+--not-a-header\n",
+        "new_file": false,
+        "deleted_file": false,
+        "renamed_file": false
+      }
+    ]
+  }
+}

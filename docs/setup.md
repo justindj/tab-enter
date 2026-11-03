@@ -2,13 +2,13 @@
 
 ## Requirements
 
-| Tool        | Version                                                            | Notes                                                                                                                                                                                      |
-| ----------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Node.js     | 22 or newer                                                        | Developed on 26                                                                                                                                                                            |
-| pnpm        | 10                                                                 | `npm install -g pnpm@10` (Node 25+ no longer bundles corepack)                                                                                                                             |
-| Git         | any recent                                                         |                                                                                                                                                                                            |
-| Claude Code | **2.0.0 or newer** (provisional, see [decisions.md](decisions.md)) | Optional for exploring the demo; required for AI features. Install it from the Claude Code docs, then run `claude` once to log in. On Windows, prefer the native installer (`claude.exe`). |
-| RTK         | optional                                                           | Rust Token Killer. Detected automatically; leave it off unless you want it.                                                                                                                |
+| Tool        | Version                                                                          | Notes                                                                                                                                                                                                                                                                         |
+| ----------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node.js     | 22 or newer                                                                      | Developed on 26                                                                                                                                                                                                                                                               |
+| pnpm        | 10                                                                               | `npm install -g pnpm@10` (Node 25+ no longer bundles corepack)                                                                                                                                                                                                                |
+| Git         | any recent                                                                       |                                                                                                                                                                                                                                                                               |
+| Claude Code | **2.1.0 or newer** (flags verified on 2.1.309, see [decisions.md](decisions.md)) | Optional for exploring the demo; required for AI features. Install the CLI so `claude` is on PATH, then run `claude auth login`. On Windows, prefer the native installer (`claude.exe`). The copy bundled inside the Claude desktop app is not on PATH and has its own login. |
+| RTK         | optional                                                                         | Rust Token Killer. Detected automatically; leave it off unless you want it.                                                                                                                                                                                                   |
 
 tab-enter never needs an Anthropic API key. It runs your installed `claude` with your own login.
 
@@ -31,18 +31,31 @@ The link changes on every start. Other local processes and websites can't use th
 On first run you land in the **Demo** profile. It uses the invented data in `fixtures/demo/`,
 needs no credentials, and spends no tokens.
 
-## Connect a real client (from M1)
+## Connect a real client
 
 1. Go to **Settings → Profiles** and create a profile.
 2. Under **Connections**, enter:
-   - **Jira Cloud:** site URL, account email and an API token.
-   - **Jira Data Center:** base URL and a personal access token.
+   - **Jira Cloud:** site URL (`https://your-site.atlassian.net`), account email and an
+     [API token](https://id.atlassian.com/manage-profile/security/api-tokens).
+   - **Jira Data Center:** base URL and a personal access token (Jira 8.14+; profile → Personal
+     Access Tokens).
+   - **Board id** (optional): limits "current sprint" to one board's active sprints. It's the
+     `rapidView`/board number in the board URL. Without it, all open sprints count.
+   - **Done-like statuses** (optional): status names to treat as done even though Jira puts them in
+     another category, e.g. `Ready for Release`.
    - **GitLab:** base URL (gitlab.com or self-managed) and a personal access token with `read_api`
      scope. Write actions (M7) need `api` scope.
-3. Tokens go to your OS keychain (macOS Keychain, Windows Credential Manager, or libsecret). On a
-   machine with no keychain, set `TAB_ENTER_PASSPHRASE`; tokens are then kept in an encrypted file.
+   - **Watched projects** (optional): one `group/project` path or numeric id per line, optionally
+     `= C:\path\to\clone`. Empty means MRs from every project.
+3. Click **Save**. Tokens go to your OS keychain (macOS Keychain, Windows Credential Manager, or
+   libsecret). On a machine with no keychain, set `TAB_ENTER_PASSPHRASE`; tokens are then kept in
+   an encrypted file. Saving queues a sync.
+4. Click **Test connection**. It calls each service's "who am I" endpoint with the saved values and
+   shows who you're connected as, or why it failed.
 
-Live sync arrives in M1. Until then, non-demo profiles show a "not built yet" sync error.
+The worker then syncs every 5 minutes (Settings → sync interval) and on **Refresh** (`r`). Jira and
+GitLab sync independently: if one fails, its last good data stays on screen and the header dot for
+it turns red with the reason.
 
 ## Environment variables
 
@@ -67,10 +80,15 @@ pnpm db:generate     # after editing packages/db/src/schema.ts
 
 ## Troubleshooting
 
-| Symptom                                   | Fix                                                                                                                                  |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| "Not signed in to this tab-enter session" | Open the link printed by `pnpm dev`. Restarting issues a new token.                                                                  |
-| "The database has not been set up"        | Start with `pnpm dev`, not `next dev` directly. It runs migrations first.                                                            |
-| Claude Code shows "Not installed"         | Install it, make sure `claude --version` works in a new terminal, then click **Re-check** in Settings.                               |
-| "No OS keychain is available"             | Set `TAB_ENTER_PASSPHRASE` and restart.                                                                                              |
-| `EPERM … unlink …\.next\…` during build   | A sync client (e.g. OneDrive) is locking build output. Delete `apps/web/.next` and rebuild, or keep the repo outside synced folders. |
+| Symptom                                    | Fix                                                                                                                                                                                 |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Not signed in to this tab-enter session"  | Open the link printed by `pnpm dev`. Restarting issues a new token.                                                                                                                 |
+| "The database has not been set up"         | Start with `pnpm dev`, not `next dev` directly. It runs migrations first.                                                                                                           |
+| Claude Code shows "Not installed"          | Install the CLI, make sure `claude --version` works in a new terminal, then click **Re-check** in Settings. The Claude desktop app's built-in copy doesn't count: it isn't on PATH. |
+| Claude Code shows "Logged out"             | Run `claude auth login` in a terminal (the CLI has its own login, separate from the desktop app), then **Re-check**.                                                                |
+| Jira or GitLab: "rejected the token (401)" | The token expired or was revoked. Create a new one and paste it in Settings → Connections.                                                                                          |
+| "Can't resolve …" / "Can't reach …"        | The host isn't reachable from this machine. Connect to the VPN for internal instances, or check the URL.                                                                            |
+| "returned a web page instead of API data"  | The URL points at a login/SSO or VPN page, or isn't the instance root. Use the base URL (no `/jira` path unless your instance has one).                                             |
+| Jira: no issues under "Current sprint"     | Your issues aren't in an open sprint, or the board id is wrong. Toggle to **All** to check.                                                                                         |
+| "No OS keychain is available"              | Set `TAB_ENTER_PASSPHRASE` and restart.                                                                                                                                             |
+| `EPERM … unlink …\.next\…` during build    | A sync client (e.g. OneDrive) is locking build output. Delete `apps/web/.next` and rebuild, or keep the repo outside synced folders.                                                |

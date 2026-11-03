@@ -1,17 +1,28 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
+  createGitLabHost,
+  createJiraTracker,
   DemoCodeHost,
   DemoIssueTracker,
   type CodeHost,
   type DemoGitLabFixture,
   type DemoJiraFixture,
+  type FetchLike,
   type IssueTracker,
 } from '@tab-enter/connectors';
-import { linkMergeRequest, mrKey } from '@tab-enter/core';
+import {
+  linkMergeRequest,
+  mrKey,
+  redactSecrets,
+  type CredentialProvider,
+  type IssueDetail,
+} from '@tab-enter/core';
 import {
   getProfile,
+  listIssues,
   listManualLinks,
+  listMergeRequests,
   recordSync,
   replaceSyncedData,
   type Db,
@@ -21,6 +32,9 @@ import {
 
 export interface SyncDeps {
   fixturesDir: string;
+  /** Required for non-demo profiles. */
+  credentials?: CredentialProvider;
+  fetch?: FetchLike;
   now?: Date;
 }
 
@@ -32,26 +46,82 @@ async function connectorsFor(
   profile: Profile,
   deps: SyncDeps,
   now: Date,
-): Promise<{ tracker: IssueTracker; host: CodeHost }> {
+  since: Date,
+): Promise<{ tracker: () => IssueTracker; host: () => CodeHost }> {
   if (profile.isDemo) {
+    const [jira, gitlab] = await Promise.all([
+      readJson<DemoJiraFixture>(path.join(deps.fixturesDir, 'demo/jira.json')),
+      readJson<DemoGitLabFixture>(path.join(deps.fixturesDir, 'demo/gitlab.json')),
+    ]);
     return {
-      tracker: new DemoIssueTracker(
-        await readJson<DemoJiraFixture>(path.join(deps.fixturesDir, 'demo/jira.json')),
-        now,
-      ),
-      host: new DemoCodeHost(
-        await readJson<DemoGitLabFixture>(path.join(deps.fixturesDir, 'demo/gitlab.json')),
-        now,
-      ),
+      tracker: () => new DemoIssueTracker(jira, now),
+      host: () => new DemoCodeHost(gitlab, now),
     };
   }
-  throw new Error(
-    'Live Jira and GitLab sync is not built yet (milestone M1). Use the Demo profile for now.',
-  );
+  const { credentials } = deps;
+  if (!credentials) throw new Error('The worker has no credential provider.');
+  const opts = {
+    profileId: profile.id,
+    settings: profile.settings,
+    credentials,
+    completedSince: since,
+    fetch: deps.fetch,
+    now: () => now,
+  };
+  // Constructed lazily so a misconfigured Jira doesn't stop GitLab syncing, and vice versa.
+  return { tracker: () => createJiraTracker(opts), host: () => createGitLabHost(opts) };
+}
+
+async function syncIssues(tracker: IssueTracker, since: Date): Promise<IssueDetail[]> {
+  const [active, completed] = await Promise.all([
+    tracker.listMyActiveIssues({ sprintOnly: false }),
+    tracker.listMyRecentlyCompleted(since),
+  ]);
+  const seen = new Set<string>();
+  const unique = [...active, ...completed].filter((i) => !seen.has(i.key) && seen.add(i.key));
+  const details = await Promise.all(unique.map((i) => tracker.getIssue(i.key)));
+  // getIssue returns the stored detail; keep the rank and sprint flag from the list call.
+  return details.map((d, i) => ({
+    ...d,
+    rank: unique[i]!.rank,
+    inOpenSprint: unique[i]!.inOpenSprint,
+  }));
+}
+
+async function syncMergeRequests(host: CodeHost, since: Date): Promise<SyncedMR[]> {
+  const [mine, merged, reviews] = await Promise.all([
+    host.listMyOpenMRs(),
+    host.listMyRecentlyMergedMRs(since),
+    host.listReviewRequests({ includeCompleted: true }),
+  ]);
+  const me = await host.getCurrentUser();
+  const myName = me.username ?? me.id;
+
+  const byKey = new Map<string, SyncedMR>();
+  for (const mr of [...mine, ...merged]) {
+    byKey.set(mrKey(mr.ref), { mr, isMine: true, isReviewer: false, needsMyReview: false });
+  }
+  for (const mr of reviews) {
+    const key = mrKey(mr.ref);
+    byKey.set(key, {
+      mr,
+      isMine: byKey.get(key)?.isMine ?? false,
+      isReviewer: true,
+      // Same rule as listReviewRequests({ includeCompleted: false }), without a second fetch.
+      needsMyReview: mr.state === 'opened' && !mr.approvedBy.includes(myName),
+    });
+  }
+  return [...byKey.values()];
+}
+
+function errorMessage(err: unknown): string {
+  return redactSecrets(err instanceof Error ? err.message : String(err));
 }
 
 /**
  * Pull everything the UI needs for one profile and replace the local copy.
+ * Jira and GitLab sync independently: if one fails, its last good data is kept
+ * and its error recorded, and the other still updates.
  * Active issues are synced regardless of sprint so the sprint toggle works offline.
  */
 export async function syncProfile(db: Db, profileId: string, deps: SyncDeps): Promise<void> {
@@ -59,50 +129,52 @@ export async function syncProfile(db: Db, profileId: string, deps: SyncDeps): Pr
   if (!profile) return; // deleted while queued
   const now = deps.now ?? new Date();
   const { settings } = profile;
+  const since = new Date(now.getTime() - settings.timeWindows.recentRetentionDays * 86_400_000);
 
+  let connectors: Awaited<ReturnType<typeof connectorsFor>>;
   try {
-    const { tracker, host } = await connectorsFor(profile, deps, now);
-    const since = new Date(now.getTime() - settings.timeWindows.recentRetentionDays * 86_400_000);
-
-    const [active, completed, mine, merged, reviews, pendingReviews] = await Promise.all([
-      tracker.listMyActiveIssues({ sprintOnly: false }),
-      tracker.listMyRecentlyCompleted(since),
-      host.listMyOpenMRs(),
-      host.listMyRecentlyMergedMRs(since),
-      host.listReviewRequests({ includeCompleted: true }),
-      host.listReviewRequests({ includeCompleted: false }),
-    ]);
-    const issues = await Promise.all([...active, ...completed].map((i) => tracker.getIssue(i.key)));
-
-    const pending = new Set(pendingReviews.map((mr) => mrKey(mr.ref)));
-    const byKey = new Map<string, SyncedMR>();
-    for (const mr of [...mine, ...merged]) {
-      byKey.set(mrKey(mr.ref), { mr, isMine: true, isReviewer: false, needsMyReview: false });
-    }
-    for (const mr of reviews) {
-      const key = mrKey(mr.ref);
-      byKey.set(key, {
-        mr,
-        isMine: byKey.get(key)?.isMine ?? false,
-        isReviewer: true,
-        needsMyReview: pending.has(key),
-      });
-    }
-    const mergeRequests = [...byKey.values()];
-
-    const manual = await listManualLinks(db, profileId);
-    const links = mergeRequests.map(({ mr }) => ({
-      mrKey: mrKey(mr.ref),
-      links: linkMergeRequest(mr, { keyRegex: settings.keyRegex, manual }),
-    }));
-
-    await replaceSyncedData(db, profileId, { issues, mergeRequests, links });
-    await recordSync(db, profileId, 'jira', {});
-    await recordSync(db, profileId, 'gitlab', {});
+    connectors = await connectorsFor(profile, deps, now, since);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     await recordSync(db, profileId, 'jira', { error: message });
     await recordSync(db, profileId, 'gitlab', { error: message });
     throw err;
   }
+
+  const [issuesResult, mrsResult] = await Promise.allSettled([
+    Promise.resolve().then(() => syncIssues(connectors.tracker(), since)),
+    Promise.resolve().then(() => syncMergeRequests(connectors.host(), since)),
+  ]);
+  if (issuesResult.status === 'rejected' && mrsResult.status === 'rejected') {
+    await recordSync(db, profileId, 'jira', { error: errorMessage(issuesResult.reason) });
+    await recordSync(db, profileId, 'gitlab', { error: errorMessage(mrsResult.reason) });
+    throw new Error(
+      `Jira: ${errorMessage(issuesResult.reason)} GitLab: ${errorMessage(mrsResult.reason)}`,
+    );
+  }
+
+  const issues =
+    issuesResult.status === 'fulfilled' ? issuesResult.value : await listIssues(db, profileId);
+  const mergeRequests =
+    mrsResult.status === 'fulfilled' ? mrsResult.value : await listMergeRequests(db, profileId);
+
+  const manual = await listManualLinks(db, profileId);
+  const links = mergeRequests.map(({ mr }) => ({
+    mrKey: mrKey(mr.ref),
+    links: linkMergeRequest(mr, { keyRegex: settings.keyRegex, manual }),
+  }));
+  await replaceSyncedData(db, profileId, { issues, mergeRequests, links });
+
+  await recordSync(
+    db,
+    profileId,
+    'jira',
+    issuesResult.status === 'fulfilled' ? {} : { error: errorMessage(issuesResult.reason) },
+  );
+  await recordSync(
+    db,
+    profileId,
+    'gitlab',
+    mrsResult.status === 'fulfilled' ? {} : { error: errorMessage(mrsResult.reason) },
+  );
 }

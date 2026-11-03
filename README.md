@@ -27,7 +27,7 @@ and connecting real clients, and [docs/decisions.md](docs/decisions.md) for desi
 apps/web          Next.js UI (reads SQLite; never runs git, Claude Code or Playwright)
 apps/worker       Job runner: sync, tool detection, Claude Code runs, verification
 packages/core     Domain types, settings, linking, MR status, view models, job protocol
-packages/connectors  IssueTracker / CodeHost interfaces, demo + (M1) Jira / GitLab
+packages/connectors  IssueTracker / CodeHost interfaces, demo, Jira (Cloud + DC), GitLab
 packages/db       Drizzle schema, migrations, repository functions
 packages/claude   Claude Code CLI: detection, args, stream parser, runner
 packages/secrets  OS keychain / encrypted-file secret store, credential provider
@@ -36,11 +36,12 @@ fixtures/         Invented demo data and recorded Claude Code output
 
 ## Status
 
-| Milestone                   | State                                                                |
-| --------------------------- | -------------------------------------------------------------------- |
-| M0 Scaffold                 | Done (Claude CLI flags still to be verified against `claude --help`) |
-| M1 Jira + GitLab connectors | Next                                                                 |
-| M2–M7                       | Planned (see spec)                                                   |
+| Milestone                   | State                                                       |
+| --------------------------- | ----------------------------------------------------------- |
+| M0 Scaffold                 | Done (Claude CLI flags verified on 2.1.309)                 |
+| M1 Jira + GitLab connectors | Done (contract-tested; not yet run against a live instance) |
+| M2 Active Work page         | Next                                                        |
+| M3–M7                       | Planned (see spec)                                          |
 
 ## License
 

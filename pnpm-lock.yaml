@@ -41,6 +41,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@tab-enter/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors
       '@tab-enter/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -105,6 +108,9 @@ importers:
       '@tab-enter/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@tab-enter/secrets':
+        specifier: workspace:*
+        version: link:../../packages/secrets
       zod:
         specifier: ^4.6.7
         version: 4.6.7

@@ -1,11 +1,15 @@
+import { defaultProfileSettings } from '@tab-enter/core';
 import {
   enqueueJob,
   ensureDemoProfile,
+  getDataDir,
   getDb,
+  getProfile,
   hasPendingJob,
   requeueStaleJobs,
 } from '@tab-enter/db';
 import { ensureDataDir, runMigrations } from '@tab-enter/db/migrate';
+import { createSecretStore, PatCredentialProvider, type SecretStore } from '@tab-enter/secrets';
 import { getFixturesDir } from './paths';
 import { processNextJob, scheduleDueSyncs } from './worker';
 
@@ -24,7 +28,29 @@ async function main() {
   await requeueStaleJobs(db, new Date(Date.now() - STALE_LOCK_MS));
   if (!(await hasPendingJob(db, 'detect-tools'))) await enqueueJob(db, { type: 'detect-tools' });
 
-  const deps = { fixturesDir: getFixturesDir(), log };
+  // Opened lazily: a missing keychain only matters once a live profile syncs.
+  let store: Promise<SecretStore> | null = null;
+  const lazyStore: SecretStore = {
+    kind: 'keychain',
+    get: async (profileId, name) => {
+      store ??= createSecretStore({
+        dataDir: getDataDir(),
+        passphrase: process.env.TAB_ENTER_PASSPHRASE,
+      }).catch((err: unknown) => {
+        store = null;
+        throw err;
+      });
+      return (await store).get(profileId, name);
+    },
+    set: () => Promise.reject(new Error('The worker never writes secrets.')),
+    delete: () => Promise.reject(new Error('The worker never deletes secrets.')),
+  };
+  const credentials = new PatCredentialProvider(
+    lazyStore,
+    async (profileId) => (await getProfile(db, profileId))?.settings ?? defaultProfileSettings(),
+  );
+
+  const deps = { fixturesDir: getFixturesDir(), credentials, log };
   let stopping = false;
   const stop = () => {
     stopping = true;

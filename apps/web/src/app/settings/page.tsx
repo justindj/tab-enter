@@ -1,4 +1,4 @@
-import type { ToolStatus } from '@tab-enter/core';
+import { formatWatchedProjects, type ToolStatus } from '@tab-enter/core';
 import type { ReactNode } from 'react';
 import { requestToolDetection } from '@/app/actions';
 import { Badge } from '@/components/ui/badge';
@@ -111,9 +111,10 @@ export default async function SettingsPage() {
             now={now}
             missing={
               <>
-                Install it from the Claude Code docs, run <code>claude</code> once to log in, then
-                Re-check. On Windows the native installer (claude.exe) is preferred over the npm
-                package.
+                Install the Claude Code CLI so <code>claude</code> is on your PATH, run{' '}
+                <code>claude auth login</code>, then Re-check. The copy bundled inside the Claude
+                desktop app is private to the app and isn’t on PATH. On Windows the native installer
+                (claude.exe) is preferred over the npm package.
               </>
             }
           />
@@ -145,8 +146,17 @@ export default async function SettingsPage() {
               key={active.id}
               profileId={active.id}
               name={active.name}
-              jira={{ deployment: s.jira.deployment, baseUrl: s.jira.baseUrl, email: s.jira.email }}
-              gitlabBaseUrl={s.gitlab.baseUrl}
+              jira={{
+                deployment: s.jira.deployment,
+                baseUrl: s.jira.baseUrl,
+                email: s.jira.email,
+                boardId: s.jira.boardId ?? '',
+                doneStatuses: s.jira.doneStatuses.join(', '),
+              }}
+              gitlab={{
+                baseUrl: s.gitlab.baseUrl,
+                projects: formatWatchedProjects(s.gitlab.projects),
+              }}
               storedSecrets={active.secretNames}
             />
           </CardBody>

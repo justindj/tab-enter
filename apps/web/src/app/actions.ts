@@ -1,6 +1,12 @@
 'use server';
 
-import { parseProfileSettings, type ProfileSettings } from '@tab-enter/core';
+import { createGitLabHost, createJiraTracker } from '@tab-enter/connectors';
+import {
+  parseProfileSettings,
+  parseWatchedProjects,
+  redactSecrets,
+  type ProfileSettings,
+} from '@tab-enter/core';
 import {
   addSecretName,
   createProfile,
@@ -15,13 +21,15 @@ import {
   setActiveProfile,
   updateProfile,
 } from '@tab-enter/db';
-import { SECRET_NAMES } from '@tab-enter/secrets';
+import { PatCredentialProvider, SECRET_NAMES } from '@tab-enter/secrets';
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { getSecretStore } from '@/lib/secrets';
 
 // Server actions. Everything here only writes SQLite or the secret store;
-// anything touching the network, git, or files is queued for the worker.
+// anything touching git, Claude Code or files is queued for the worker. The one
+// network call is Test connection, which needs an immediate answer (see
+// docs/decisions.md).
 
 export interface ActionResult {
   ok?: string;
@@ -102,9 +110,21 @@ const ConnectionsSchema = z.object({
   jiraBaseUrl: httpUrl,
   jiraEmail: z.string().trim(),
   jiraToken: z.string(),
+  jiraBoardId: z
+    .string()
+    .trim()
+    .refine((v) => v === '' || /^\d+$/.test(v), 'The board id is a number (from the board URL).'),
+  jiraDoneStatuses: z.string(),
   gitlabBaseUrl: httpUrl,
   gitlabToken: z.string(),
+  gitlabProjects: z.string(),
 });
+
+const csv = (text: string) =>
+  text
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
 export async function saveConnectionsAction(
   _prev: ActionResult,
@@ -116,6 +136,12 @@ export async function saveConnectionsAction(
   const profile = await requireProfile(input.profileId);
   if (profile.isDemo) return { error: 'The demo profile has no connections.' };
 
+  let projects;
+  try {
+    projects = parseWatchedProjects(input.gitlabProjects);
+  } catch {
+    return { error: 'Watched projects: one GitLab path or id per line.' };
+  }
   const settings: ProfileSettings = parseProfileSettings({
     ...profile.settings,
     jira: {
@@ -123,8 +149,14 @@ export async function saveConnectionsAction(
       deployment: input.jiraDeployment,
       baseUrl: input.jiraBaseUrl,
       email: input.jiraEmail,
+      boardId: input.jiraBoardId || undefined,
+      doneStatuses: csv(input.jiraDoneStatuses),
     },
-    gitlab: { ...profile.settings.gitlab, baseUrl: input.gitlabBaseUrl || 'https://gitlab.com' },
+    gitlab: {
+      ...profile.settings.gitlab,
+      baseUrl: input.gitlabBaseUrl || 'https://gitlab.com',
+      projects,
+    },
   });
   const db = await getDb();
   await updateProfile(db, profile.id, { name: input.name, settings });
@@ -146,8 +178,48 @@ export async function saveConnectionsAction(
       error: `Settings saved, but the token could not be stored: ${err instanceof Error ? err.message : err}`,
     };
   }
+  if (!(await hasPendingJob(db, 'sync', profile.id))) {
+    await enqueueJob(db, { type: 'sync', profileId: profile.id });
+  }
   revalidatePath('/', 'layout');
-  return { ok: 'Saved.' };
+  return { ok: 'Saved. Syncing now.' };
+}
+
+export interface ConnectionTestResult {
+  jira: ActionResult;
+  gitlab: ActionResult;
+}
+
+/**
+ * Calls each service's "who am I" endpoint with the saved settings and token.
+ * Tokens are read server-side and only the outcome is returned to the browser.
+ */
+export async function testConnectionsAction(profileId: string): Promise<ConnectionTestResult> {
+  const profile = await requireProfile(profileId);
+  if (profile.isDemo) {
+    const demo = { error: 'The demo profile has no connections.' };
+    return { jira: demo, gitlab: demo };
+  }
+  const credentials = new PatCredentialProvider(
+    await getSecretStore(),
+    async () => profile.settings,
+  );
+  const opts = { profileId, settings: profile.settings, credentials };
+
+  const describe = async (who: () => Promise<{ displayName: string; username?: string }>) => {
+    try {
+      const user = await who();
+      const name = user.username ? `${user.displayName} (${user.username})` : user.displayName;
+      return { ok: `Connected as ${name}.` };
+    } catch (err) {
+      return { error: redactSecrets(err instanceof Error ? err.message : String(err)) };
+    }
+  };
+  const [jira, gitlab] = await Promise.all([
+    describe(() => createJiraTracker(opts).getCurrentUser()),
+    describe(() => createGitLabHost(opts).getCurrentUser()),
+  ]);
+  return { jira, gitlab };
 }
 
 const ClaudeSettingsSchema = z.object({

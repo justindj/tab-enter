@@ -1,4 +1,5 @@
-import { JobSchema, redactSecrets, type Job } from '@tab-enter/core';
+import { JobSchema, redactSecrets, type CredentialProvider, type Job } from '@tab-enter/core';
+import type { FetchLike } from '@tab-enter/connectors';
 import {
   claimNextJob,
   enqueueJob,
@@ -14,6 +15,9 @@ import { syncProfile } from './handlers/sync';
 
 export interface WorkerDeps {
   fixturesDir: string;
+  /** Tokens for live Jira/GitLab syncs (from the OS keychain in production). */
+  credentials?: CredentialProvider;
+  fetch?: FetchLike;
   log?: (message: string) => void;
 }
 
@@ -22,7 +26,11 @@ async function dispatch(db: Db, job: Job, deps: WorkerDeps): Promise<void> {
     case 'detect-tools':
       return detectTools(db);
     case 'sync':
-      return syncProfile(db, job.profileId, { fixturesDir: deps.fixturesDir });
+      return syncProfile(db, job.profileId, {
+        fixturesDir: deps.fixturesDir,
+        credentials: deps.credentials,
+        fetch: deps.fetch,
+      });
     case 'delete-profile-files':
       return deleteProfileFiles(job.profileId);
   }

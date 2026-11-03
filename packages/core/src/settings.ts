@@ -20,7 +20,14 @@ export const TaskPresetSchema = z.object({
   model: z.string(),
   allowedTools: z.array(z.string()),
   disallowedTools: z.array(z.string()),
-  permissionMode: z.enum(['default', 'acceptEdits', 'plan']),
+  /**
+   * Claude Code 2.1.309 lists acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.
+   * bypassPermissions and auto are never offered. "default" (stored by M0) means dontAsk.
+   */
+  permissionMode: z.preprocess(
+    (v) => (v === 'default' ? 'dontAsk' : v),
+    z.enum(['acceptEdits', 'dontAsk', 'plan']),
+  ),
   maxTurns: z.number().int().positive(),
   /** task = streamed, edits files; analysis = single JSON result, read-only or minimal tools. */
   mode: z.enum(['task', 'analysis']),
@@ -71,7 +78,7 @@ export const DEFAULT_PRESETS: Record<PresetId, TaskPreset> = {
     model: 'sonnet',
     allowedTools: ['Read', 'Grep', 'Glob'],
     disallowedTools: ['Edit', 'Write', 'NotebookEdit', 'Bash'],
-    permissionMode: 'default',
+    permissionMode: 'dontAsk',
     maxTurns: 15,
     mode: 'analysis',
   },
@@ -90,7 +97,7 @@ export const DEFAULT_PRESETS: Record<PresetId, TaskPreset> = {
     model: 'haiku',
     allowedTools: [],
     disallowedTools: ['Read', 'Edit', 'Write', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch'],
-    permissionMode: 'default',
+    permissionMode: 'dontAsk',
     maxTurns: 1,
     mode: 'analysis',
   },
@@ -213,6 +220,34 @@ export type ProfileSettings = z.infer<typeof ProfileSettingsSchema>;
 
 export function defaultProfileSettings(): ProfileSettings {
   return ProfileSettingsSchema.parse({});
+}
+
+/**
+ * Watched projects as edited in Settings: one per line, a GitLab path or numeric
+ * id, optionally followed by "=" and the local clone path.
+ */
+export function parseWatchedProjects(text: string): WatchedProject[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'))
+    .map((line) => {
+      const eq = line.indexOf('=');
+      const project = (eq < 0 ? line : line.slice(0, eq)).trim().replace(/^\/+|\/+$/g, '');
+      const localPath = eq < 0 ? '' : line.slice(eq + 1).trim();
+      return WatchedProjectSchema.parse({
+        // A path works as an id too: GitLab accepts the URL-encoded path.
+        id: project,
+        path: /^\d+$/.test(project) ? '' : project,
+        ...(localPath ? { localPath } : {}),
+      });
+    });
+}
+
+export function formatWatchedProjects(projects: WatchedProject[]): string {
+  return projects
+    .map((p) => `${p.path || p.id}${p.localPath ? ` = ${p.localPath}` : ''}`)
+    .join('\n');
 }
 
 /** Parse stored settings, filling in defaults for fields added since they were saved. */

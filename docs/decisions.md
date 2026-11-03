@@ -86,34 +86,49 @@ See [schema.md](schema.md) for the full proposal.
   write-only in the UI: a blank field keeps the stored token, and values are never sent back.
 - **Profiles store secret names, never values** (`profiles.secret_names`), so deleting a profile
   can remove its keychain entries.
-- **`apps/web` touches only SQLite and the secret store.** The secret store counts as storage, like
-  the database. Removing a deleted profile's files is queued as a worker job.
+- **`apps/web` touches only SQLite and the secret store**, plus one network call: **Test
+  connection**, which calls each service's "who am I" endpoint from a server action. It needs an
+  answer while the user waits, the spec allows server-side API calls from the web app, and it reads
+  the token server-side and returns only "Connected as …" or the error. Everything else (syncs,
+  git, Claude Code, files) goes through the worker. Removing a deleted profile's files is queued as
+  a worker job.
 - **Approval is always a human click** behind a confirmation, even when Claude recommends approving.
   v1 has no auto-approve setting. This is deliberate: an approval is a statement by the reviewer, and
   tab-enter must not make it for them.
 
 ## Claude Code CLI
 
-> **Unverified flags.** `claude` was not installed on the machine where M0 was written, so the
-> flags below come from the Claude Code docs and have not yet been checked against `claude --help`.
-> Before M3, run `claude --help` and `claude --version`, update this table, and record the version
-> checked. The stream parser is tested against recorded output in `fixtures/claude/`. Re-record
-> those fixtures from a real run at the same time.
+> **Verified against Claude Code 2.1.309** (2026-11-02) with `claude --help` and by parsing each
+> flag with an empty prompt, which makes the CLI validate options and then exit before calling a
+> model. Unknown options are rejected (`error: unknown option`), so a removed flag fails loudly.
+> The stream parser fixtures in `fixtures/claude/` are still hand-written. Re-record them from a
+> real run in M3, once a logged-in CLI is on PATH.
 
-| Flag                          | Used for                                                                                                                                  |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `-p` / `--print`              | Headless mode. **The prompt is written to stdin, never passed as an argument**, which avoids OS command-line limits and quoting problems. |
-| `--output-format stream-json` | Task runs (streamed events, one JSON object per line)                                                                                     |
-| `--verbose`                   | Required by `stream-json` in print mode                                                                                                   |
-| `--output-format json`        | Analysis runs (one result object)                                                                                                         |
-| `--model <alias>`             | Preset model (`sonnet`, `haiku`). The model actually used is read from `modelUsage` in the result.                                        |
-| `--permission-mode <mode>`    | `acceptEdits` for task presets, `default` for read-only presets                                                                           |
-| `--max-turns <n>`             | Per preset                                                                                                                                |
-| `--allowedTools <rules…>`     | Explicit allowlist. Each rule is a **separate argv entry** because rules contain spaces, e.g. `Bash(git commit:*)`.                       |
-| `--disallowedTools <rules…>`  | Preset denials plus `ALWAYS_DISALLOWED_TOOLS` (below)                                                                                     |
-| `--resume <session_id>`       | Continue a run, and "Open in terminal"                                                                                                    |
-| `--settings <file>`           | RTK per-run mode: a run-only settings file carrying RTK's hook (never the user's global settings)                                         |
-| `--version`, `auth status`    | Detection                                                                                                                                 |
+| Flag                          | Used for                                                                                                                                                                          |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-p` / `--print`              | Headless mode. **The prompt is written to stdin, never passed as an argument**, which avoids OS command-line limits and quoting problems.                                         |
+| `--output-format stream-json` | Task runs (streamed events, one JSON object per line)                                                                                                                             |
+| `--verbose`                   | Required by `stream-json` in print mode                                                                                                                                           |
+| `--output-format json`        | Analysis runs (one result object)                                                                                                                                                 |
+| `--model <alias>`             | Preset model (`sonnet`, `haiku`). The model actually used is read from `modelUsage` in the result.                                                                                |
+| `--permission-mode <mode>`    | `acceptEdits` for task presets, `dontAsk` for read-only presets. 2.1.309 lists `acceptEdits, auto, bypassPermissions, manual, dontAsk, plan`. `default` is accepted but unlisted. |
+| `--permission-prompts none`   | Every run. Headless runs have nobody to answer a prompt, so anything not explicitly allowed is denied rather than hanging.                                                        |
+| `--max-turns <n>`             | Per preset. **Hidden** in 2.1.309 (not in `--help`) but accepted. Watch for its removal.                                                                                          |
+| `--allowedTools <rules…>`     | Explicit allowlist. Each rule is a **separate argv entry** because rules contain spaces, e.g. `Bash(git commit:*)`. The CLI also accepts comma/space-separated lists.             |
+| `--disallowedTools <rules…>`  | Preset denials plus `ALWAYS_DISALLOWED_TOOLS` (below)                                                                                                                             |
+| `--resume <session_id>`       | Continue a run, and "Open in terminal"                                                                                                                                            |
+| `--settings <file-or-json>`   | RTK per-run mode: a run-only settings file carrying RTK's hook (never the user's global settings)                                                                                 |
+| `--version`, `auth status`    | Detection. `auth status` prints JSON (`loggedIn`, `authMethod`, …) and exits 1 when logged out.                                                                                   |
+
+Not used yet, worth considering later: `--json-schema` (validated structured output, for code
+review in M5), `--tools ""` (removes all tools, stronger than denying them, for the short-text
+preset), `--max-budget-usd` (per-run soft limit), `--no-session-persistence` (analysis runs that
+are never resumed).
+
+- **The Claude desktop app's bundled CLI is not used.** It lives in a private, versioned folder
+  under the app's data directory, isn't on PATH, and gets its login from the desktop app (its own
+  `auth status` reports logged out). tab-enter only detects a `claude` on PATH, which the user
+  installs and logs in to (`claude auth login`).
 
 - **Never used:** `--dangerously-skip-permissions` and `--allow-dangerously-skip-permissions`.
   `buildClaudeArgs` throws if either appears, and the preset schema has no `bypassPermissions` mode.
@@ -126,14 +141,90 @@ publish`, `curl`, `wget`, `ssh`, `scp`. Claude may commit locally. Pushing and o
 - **Verification preset** limits `Write` to `{{artifactsDir}}/**`, substituted per run. A missing
   value throws rather than producing a broader rule.
 - **Short-text preset** allows no tools, denies the common ones, and runs one turn.
-- **Login detection** runs `claude auth status` only on CLI 2.1.0 and later (to be verified). Older
-  CLIs may treat unknown words as a prompt and start a session. Otherwise detection falls back to the
-  presence of `~/.claude/.credentials.json` (Linux and Windows). On macOS credentials are in the
-  keychain, so a missing file shows "unknown" rather than "logged out".
-- **Minimum supported version: 2.0.0** (`CLAUDE_MIN_VERSION`), provisional until verified.
+- **Login detection** runs `claude auth status` (verified on 2.1.309; only attempted on 2.1.0+,
+  since older CLIs may treat unknown words as a prompt). If its output can't be read, detection
+  falls back to the presence of `~/.claude/.credentials.json` (Linux and Windows). On macOS
+  credentials are in the keychain, so a missing file shows "unknown" rather than "logged out".
+- **Minimum supported version: 2.1.0** (`CLAUDE_MIN_VERSION`). Flags were verified on 2.1.309;
+  earlier 2.1.x releases are assumed compatible but untested.
 - **Windows:** `claude.exe` (the native installer) is preferred. A `.cmd` shim (npm install) can
   only run through `cmd.exe`, so `spawnCommand` quotes each argument and refuses any containing
   `" % ! ^ & | < >` or newlines rather than trying to escape them.
+
+## Jira connector (M1)
+
+Checked against Atlassian's docs on 2026-11-02.
+
+- **Cloud uses `POST /rest/api/3/search/jql`.** The old `/rest/api/3/search` was removed from
+  Cloud. The new endpoint pages with `nextPageToken` / `isLast` and returns no `total`, so the loop
+  follows tokens. POST keeps long JQL out of the URL. **Data Center uses `POST /rest/api/2/search`**
+  with `startAt` / `maxResults` / `total`. Data Center's v3 API isn't reliable (some versions return
+  an HTML page for `/rest/api/3/...`).
+- **Auth:** Cloud is Basic `email:api-token`; Data Center is `Authorization: Bearer <PAT>` (Jira
+  8.14+).
+- **Rich text:** Cloud returns descriptions and comments as Atlassian Document Format (ADF) JSON,
+  and Data Center returns wiki markup. Both are reduced to plain text with `- ` bullets
+  (`jira-text.ts`), so context builders see one format.
+- **Acceptance criteria** come from the list under an "Acceptance criteria" heading in the
+  description. Jira has no standard field for them, and custom field ids differ per site. A
+  per-profile custom field id can be added if a client keeps them in a field.
+- **Rank:** the rank field is a custom field whose id differs per site, so tab-enter asks Jira for
+  `ORDER BY Rank ASC` and stores each issue's position as a zero-padded string. It sorts the same
+  way and needs no field discovery.
+- **Sprint:** a second, key-only query with `AND sprint in openSprints()` (or `sprint in (<active
+sprint ids>)` when a board id is set, via `/rest/agile/1.0/board/{id}/sprint?state=active`). If
+  the site has no sprint field (no Jira Software), the query fails with 400 and every active issue
+  counts as current, so the sprint toggle doesn't hide everything.
+- **Recently completed:** `statusCategory = Done AND updated >= -<N>m`, then filtered on
+  `resolutiondate` (falling back to `statuscategorychangedate`, then `updated`). Relative minutes
+  avoid JQL's rule that absolute dates are in the user's Jira timezone.
+- **Done-like statuses** from Settings are excluded from active work (`status not in (…)`) and
+  counted as done.
+- **Search results carry the detail fields** (description, comments), so a sync makes 3–4
+  requests in total, not one per issue. Up to 1000 issues per query.
+
+## GitLab connector (M1)
+
+Checked against docs.gitlab.com on 2026-11-02.
+
+- **Lists:** `GET /merge_requests` with `scope=created_by_me` (mine, opened and merged with
+  `updated_after`) and `scope=all&reviewer_id=<me>` (review requests). This is one call per list
+  across all projects, rather than one per watched project. Watched projects filter the results by
+  id or path, and an empty list means all projects. Pagination follows the `x-next-page` header.
+- **Per-MR requests:** list rows have no head pipeline, approvals or thread state, so each MR
+  costs:
+  - `GET /projects/:id/merge_requests/:iid` (`head_pipeline`, `detailed_merge_status`,
+    `has_conflicts`)
+  - `…/approvals`, which is available on Free. Community Edition returns only `approved_by`, so
+    `approvals_required` defaults to 0.
+  - for open MRs only, `…/discussions` and `…/diffs` (line counts; GitLab 15.7+, and a 404 just
+    means no counts).
+
+  At most 4 MRs are fetched at a time.
+
+- **Unresolved threads** are discussions with a resolvable note that isn't resolved.
+- **Changes requested** is `detailed_merge_status == requested_changes`. GitLab reports only the
+  top merge blocker there, so an MR with conflicts _and_ requested changes shows only the
+  conflicts. The per-reviewer `…/reviewers` state would fix that for one more request per MR. Left
+  for later.
+- **Pipeline statuses** fold into tab-enter's set: `created`, `waiting_for_resource`, `preparing`,
+  `scheduled` → pending; `canceling` → canceled; no pipeline → none.
+
+## Sync (M1)
+
+- **The HTTP client** (`packages/connectors/src/http.ts`) retries 429/502/503/504 and network
+  errors up to 3 times, honouring `Retry-After` (capped at 60 s) or else backing off exponentially.
+  It times out after 30 s. It maps errors to messages the UI can show as they are:
+  - 401: "renew it in Settings"
+  - 403: scopes
+  - DNS or connection failures: "check the VPN"
+  - an HTML page served with status 200: "a login/VPN page is in the way"
+- **Jira and GitLab sync independently.** If one fails, its last good rows are kept, its error
+  goes in `sync_state`, and the other still updates. If both fail, the job fails.
+- **Still a full replace, not incremental.** The `updated >=` cursor (spec section 5) would save
+  little at one developer's volume, and it complicates detecting removed issues (unassigned,
+  deleted). `sync_state.cursor` stays reserved.
+- **Saving connections queues a sync** so new settings take effect at once.
 
 ## Worker
 

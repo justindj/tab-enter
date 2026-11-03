@@ -6,7 +6,9 @@ import {
   deleteProfileAction,
   saveClaudeSettingsAction,
   saveConnectionsAction,
+  testConnectionsAction,
   type ActionResult,
+  type ConnectionTestResult,
 } from '@/app/actions';
 import { Button } from '@/components/ui/button';
 import { Checkbox, Field, Input, Select } from '@/components/ui/field';
@@ -72,12 +74,20 @@ export function DeleteProfileButton({ id, name }: { id: string; name: string }) 
 export function ConnectionsForm(props: {
   profileId: string;
   name: string;
-  jira: { deployment: 'cloud' | 'datacenter'; baseUrl: string; email: string };
-  gitlabBaseUrl: string;
+  jira: {
+    deployment: 'cloud' | 'datacenter';
+    baseUrl: string;
+    email: string;
+    boardId: string;
+    doneStatuses: string;
+  };
+  gitlab: { baseUrl: string; projects: string };
   storedSecrets: string[];
 }) {
   const [state, action, pending] = useActionState(saveConnectionsAction, {});
   const [deployment, setDeployment] = useState(props.jira.deployment);
+  const [testing, startTest] = useTransition();
+  const [test, setTest] = useState<ConnectionTestResult | null>(null);
   const stored = (name: string) => props.storedSecrets.includes(name);
 
   return (
@@ -136,14 +146,27 @@ export function ConnectionsForm(props: {
               placeholder={stored('jira-token') ? '••••••••' : ''}
             />
           </Field>
+          <Field
+            label="Board id (optional)"
+            hint="Limits “current sprint” to this board’s active sprints. Otherwise all open sprints count."
+          >
+            <Input name="jiraBoardId" inputMode="numeric" defaultValue={props.jira.boardId} />
+          </Field>
+          <Field
+            label="Done-like statuses (optional)"
+            hint="Comma-separated status names to treat as done, e.g. Ready for Release."
+          >
+            <Input name="jiraDoneStatuses" defaultValue={props.jira.doneStatuses} />
+          </Field>
         </div>
+        {test && <Result state={test.jira} />}
       </fieldset>
 
       <fieldset className="grid gap-3">
         <legend className="mb-2 text-sm font-semibold">GitLab</legend>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Base URL" hint="gitlab.com or your self-managed instance.">
-            <Input name="gitlabBaseUrl" type="url" defaultValue={props.gitlabBaseUrl} />
+            <Input name="gitlabBaseUrl" type="url" defaultValue={props.gitlab.baseUrl} />
           </Field>
           <Field
             label="Personal access token"
@@ -161,6 +184,19 @@ export function ConnectionsForm(props: {
             />
           </Field>
         </div>
+        <Field
+          label="Watched projects (optional)"
+          hint="One GitLab project path or id per line, optionally “= local clone path”. Leave empty to include every project."
+        >
+          <textarea
+            name="gitlabProjects"
+            rows={3}
+            defaultValue={props.gitlab.projects}
+            placeholder={'group/project = C:\\code\\project'}
+            className="w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs placeholder:text-muted-foreground"
+          />
+        </Field>
+        {test && <Result state={test.gitlab} />}
       </fieldset>
 
       <div className="flex items-center gap-3">
@@ -170,10 +206,13 @@ export function ConnectionsForm(props: {
         <Button
           type="button"
           variant="outline"
-          disabled
-          title="Arrives with the live connectors in M1"
+          disabled={testing}
+          title="Checks the saved URL and token. Save first if you changed them."
+          onClick={() =>
+            startTest(async () => setTest(await testConnectionsAction(props.profileId)))
+          }
         >
-          Test connection
+          {testing ? 'Testing…' : 'Test connection'}
         </Button>
         <Result state={state} />
       </div>

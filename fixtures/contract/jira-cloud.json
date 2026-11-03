@@ -1,0 +1,177 @@
+{
+  "_comment": "Invented Jira Cloud REST v3 responses (shape per developer.atlassian.com, search/jql with nextPageToken). Used by packages/connectors/src/jira.test.ts.",
+  "myself": {
+    "accountId": "5b10ac8d82e05b22cc7d4ef5",
+    "emailAddress": "dev@example.com",
+    "displayName": "Dana Developer",
+    "active": true
+  },
+  "activePages": [
+    {
+      "issues": [
+        {
+          "id": "10101",
+          "key": "SHOP-101",
+          "fields": {
+            "summary": "Validate email addresses on login",
+            "status": {
+              "name": "In Progress",
+              "statusCategory": { "key": "indeterminate", "name": "In Progress" }
+            },
+            "priority": { "name": "High" },
+            "issuetype": { "name": "Story" },
+            "updated": "2026-05-31T09:30:00.000+0000",
+            "resolutiondate": null,
+            "description": {
+              "type": "doc",
+              "version": 1,
+              "content": [
+                {
+                  "type": "paragraph",
+                  "content": [
+                    {
+                      "type": "text",
+                      "text": "Users can submit the login form with an invalid email."
+                    }
+                  ]
+                },
+                {
+                  "type": "heading",
+                  "attrs": { "level": 3 },
+                  "content": [{ "type": "text", "text": "Acceptance criteria" }]
+                },
+                {
+                  "type": "bulletList",
+                  "content": [
+                    {
+                      "type": "listItem",
+                      "content": [
+                        {
+                          "type": "paragraph",
+                          "content": [
+                            { "type": "text", "text": "Invalid emails show an inline error" }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "listItem",
+                      "content": [
+                        {
+                          "type": "paragraph",
+                          "content": [
+                            { "type": "text", "text": "The submit button stays disabled" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "comment": {
+              "comments": [
+                {
+                  "author": { "displayName": "Pat Product" },
+                  "body": {
+                    "type": "doc",
+                    "version": 1,
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "content": [
+                          { "type": "mention", "attrs": { "id": "x", "text": "@Dana Developer" } },
+                          { "type": "text", "text": " please also cover the signup form." }
+                        ]
+                      }
+                    ]
+                  },
+                  "created": "2026-05-30T14:00:00.000+0000"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "nextPageToken": "page-2-token",
+      "isLast": false
+    },
+    {
+      "issues": [
+        {
+          "id": "10112",
+          "key": "SHOP-112",
+          "fields": {
+            "summary": "Add order history pagination",
+            "status": { "name": "To Do", "statusCategory": { "key": "new", "name": "To Do" } },
+            "priority": { "name": "Medium" },
+            "issuetype": { "name": "Story" },
+            "updated": "2026-05-29T08:00:00.000+0000",
+            "resolutiondate": null,
+            "description": null,
+            "comment": { "comments": [] }
+          }
+        },
+        {
+          "id": "10118",
+          "key": "SHOP-118",
+          "fields": {
+            "summary": "Spike: search provider options",
+            "status": { "name": "To Do", "statusCategory": { "key": "new", "name": "To Do" } },
+            "priority": null,
+            "issuetype": { "name": "Task" },
+            "updated": "2026-05-20T08:00:00.000+0000",
+            "resolutiondate": null,
+            "description": null,
+            "comment": { "comments": [] }
+          }
+        }
+      ],
+      "isLast": true
+    }
+  ],
+  "sprint": {
+    "issues": [
+      {
+        "id": "10101",
+        "key": "SHOP-101",
+        "fields": { "summary": "Validate email addresses on login" }
+      },
+      { "id": "10112", "key": "SHOP-112", "fields": { "summary": "Add order history pagination" } }
+    ],
+    "isLast": true
+  },
+  "done": {
+    "issues": [
+      {
+        "id": "10099",
+        "key": "SHOP-099",
+        "fields": {
+          "summary": "Password reset link expires too early",
+          "status": { "name": "Done", "statusCategory": { "key": "done", "name": "Done" } },
+          "priority": { "name": "High" },
+          "issuetype": { "name": "Bug" },
+          "updated": "2026-05-31T11:00:00.000+0000",
+          "resolutiondate": "2026-05-31T10:00:00.000+0000",
+          "description": null,
+          "comment": { "comments": [] }
+        }
+      },
+      {
+        "id": "10080",
+        "key": "SHOP-080",
+        "fields": {
+          "summary": "Old ticket touched recently",
+          "status": { "name": "Done", "statusCategory": { "key": "done", "name": "Done" } },
+          "priority": { "name": "Low" },
+          "issuetype": { "name": "Bug" },
+          "updated": "2026-05-31T11:00:00.000+0000",
+          "resolutiondate": "2026-04-01T10:00:00.000+0000",
+          "description": null,
+          "comment": { "comments": [] }
+        }
+      }
+    ],
+    "isLast": true
+  }
+}

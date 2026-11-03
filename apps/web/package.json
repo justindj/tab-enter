@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@tab-enter/connectors": "workspace:*",
     "@tab-enter/core": "workspace:*",
     "@tab-enter/db": "workspace:*",
     "@tab-enter/secrets": "workspace:*",

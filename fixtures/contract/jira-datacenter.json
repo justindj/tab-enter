@@ -1,0 +1,69 @@
+{
+  "_comment": "Invented Jira Data Center REST v2 responses (search with startAt/maxResults/total; wiki-markup text). Used by packages/connectors/src/jira.test.ts.",
+  "myself": {
+    "key": "JIRAUSER10100",
+    "name": "dana",
+    "emailAddress": "dana@example.com",
+    "displayName": "Dana Developer"
+  },
+  "activePages": [
+    {
+      "startAt": 0,
+      "maxResults": 100,
+      "total": 2,
+      "issues": [
+        {
+          "key": "OPS-7",
+          "fields": {
+            "summary": "Rotate staging certificates",
+            "status": {
+              "name": "In Review",
+              "statusCategory": { "key": "indeterminate", "name": "In Progress" }
+            },
+            "priority": { "name": "Major" },
+            "issuetype": { "name": "Task" },
+            "updated": "2026-05-31T09:30:00.000+0000",
+            "resolutiondate": null,
+            "description": "Certificates expire next week.\n\nh3. Acceptance Criteria\n* New certificates are installed\n* Monitoring shows no TLS errors\n\nh3. Notes\nSee runbook.",
+            "comment": {
+              "comments": [
+                {
+                  "author": { "displayName": "Sam Ops" },
+                  "body": "Runbook is at https://wiki.example.com/certs",
+                  "created": "2026-05-30T14:00:00.000+0000"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "startAt": 1,
+      "maxResults": 100,
+      "total": 2,
+      "issues": [
+        {
+          "key": "OPS-9",
+          "fields": {
+            "summary": "Ready for QA handoff",
+            "status": {
+              "name": "Ready for Release",
+              "statusCategory": { "key": "indeterminate", "name": "In Progress" }
+            },
+            "priority": { "name": "Minor" },
+            "issuetype": { "name": "Task" },
+            "updated": "2026-05-29T08:00:00.000+0000",
+            "resolutiondate": null,
+            "description": null,
+            "comment": { "comments": [] }
+          }
+        }
+      ]
+    }
+  ],
+  "sprintError": {
+    "errorMessages": ["Field 'sprint' does not exist or you do not have permission to view it."],
+    "errors": {}
+  }
+}
