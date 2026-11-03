@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { ConnectionStatus } from '@/components/shell/connection-status';
 import { ProfileSwitcher, RefreshButton } from '@/components/shell/header-controls';
 import { KeyboardShortcuts } from '@/components/shell/keyboard-shortcuts';
 import { Sidebar } from '@/components/shell/sidebar';
@@ -39,12 +40,16 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                 {active.isDemo && <Badge tone="info">Demo mode: invented data</Badge>}
               </div>
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <ConnectionStatus connections={app.connections} />
+                <span className="h-4 border-l" aria-hidden />
                 {app.sync.error ? (
                   <span className="text-danger" title={app.sync.error}>
                     Sync failed: {app.sync.error.slice(0, 80)}
                   </span>
                 ) : (
-                  <span>Synced {timeAgo(app.sync.lastSyncedAt, app.now)}</span>
+                  <span className="whitespace-nowrap">
+                    Synced {timeAgo(app.sync.lastSyncedAt, app.now)}
+                  </span>
                 )}
                 <RefreshButton syncing={app.sync.syncing} />
               </div>

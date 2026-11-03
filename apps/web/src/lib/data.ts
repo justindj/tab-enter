@@ -1,5 +1,5 @@
 import 'server-only';
-import { buildWorkspace } from '@tab-enter/core';
+import { buildWorkspace, deriveConnections } from '@tab-enter/core';
 import {
   ensureDemoProfile,
   getActiveProfile,
@@ -64,6 +64,13 @@ export const loadApp = cache(async () => {
     workspace,
     sync: { lastSyncedAt, error: syncError, syncing },
     tools,
+    connections: deriveConnections({
+      isDemo: active.isDemo,
+      settings: active.settings,
+      secretNames: active.secretNames,
+      syncStates,
+      claude: tools.claude,
+    }),
     now,
   };
 });
