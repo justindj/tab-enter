@@ -50,6 +50,8 @@ export interface Workspace {
   /** MRs where I'm a reviewer; those awaiting me first. */
   reviews: MRView[];
   issuesByKey: Map<string, IssueDetail>;
+  /** Every synced MR (mine and reviews), for reports with their own time window. */
+  mergeRequests: MRView[];
 }
 
 export function buildWorkspace(input: WorkspaceInput): Workspace {
@@ -119,5 +121,6 @@ export function buildWorkspace(input: WorkspaceInput): Workspace {
     recentlyCompleted: { issues: recentIssues, mrs: recentMrs },
     reviews,
     issuesByKey,
+    mergeRequests: views,
   };
 }

@@ -42,8 +42,9 @@ fixtures/         Invented demo data and recorded Claude Code output
 | M1 Jira + GitLab connectors | Done (contract-tested; not yet run against a live instance) |
 | M2 Active Work page         | Done                                                        |
 | M3 Claude Code runner + Now | Done (real runs not yet tried: no logged-in CLI on PATH)    |
-| M4 Communication page       | Next                                                        |
-| M5–M7                       | Planned (see spec)                                          |
+| M4 Communication page       | Done                                                        |
+| M5 Code Review page         | Next                                                        |
+| M6–M7                       | Planned (see spec)                                          |
 
 ## License
 

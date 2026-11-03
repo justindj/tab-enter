@@ -1,5 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import type { AgentEvent, AgentRunner, AgentRunRequest, ToolStatus } from '@tab-enter/core';
+import {
+  extractPolishMessage,
+  type AgentEvent,
+  type AgentRunner,
+  type AgentRunRequest,
+  type ToolStatus,
+} from '@tab-enter/core';
 import { parseMessage, parseStreamLine } from './stream';
 
 // Demo mode: replays recorded Claude Code output so runs can be explored and
@@ -44,6 +50,34 @@ export class ReplayRunner implements AgentRunner {
     if (request.preset.mode === 'analysis') {
       await wait();
       if (signal.aborted) return yield { type: 'error', message: 'Run cancelled.' };
+      // A tool-less one-turn preset is "short text" (report polish): there's no
+      // recording of rewriting *this* text, so echo it back unchanged and say so.
+      const echo =
+        request.preset.allowedTools.length === 0 ? extractPolishMessage(request.prompt) : null;
+      if (echo !== null) {
+        yield {
+          type: 'text',
+          text: 'Demo replay: polishing is simulated, so the text comes back unchanged.',
+        };
+        yield {
+          type: 'result',
+          sessionId: request.resumeSessionId ?? 'demo-short-text',
+          isError: false,
+          subtype: 'success',
+          resultText: echo,
+          numTurns: 1,
+          durationMs: delay,
+          models: ['claude-haiku-5-5'],
+          usage: {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            costUsd: 0,
+          },
+        };
+        return;
+      }
       yield* parseMessage(JSON.parse(await readFile(this.options.analysisFixture, 'utf8')));
       return;
     }

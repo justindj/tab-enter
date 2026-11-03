@@ -2,6 +2,7 @@
 
 import { createGitLabHost, createJiraTracker } from '@tab-enter/connectors';
 import {
+  DEFAULT_MESSAGE_TEMPLATES,
   DEFAULT_TEMPLATES,
   isIssueKey,
   SUGGESTION_KINDS,
@@ -282,6 +283,60 @@ export async function saveClaudeSettingsAction(
       softLimits: { perRunUsd: input.perRunUsd, perDayUsd: input.perDayUsd },
     },
     rtk: { ...profile.settings.rtk, mode: input.rtkMode },
+  });
+  await updateProfile(await getDb(), profile.id, { settings });
+  revalidatePath('/', 'layout');
+  return { ok: 'Saved.' };
+}
+
+const MessageSettingsSchema = z.object({
+  profileId: z.string(),
+  mode: z.enum(['last24h', 'sinceLastReport', 'sinceDate', 'customHours']),
+  customHours: z.string().trim(),
+  sinceDate: z.string().trim(),
+  mondayCoversWeekend: z.literal('on').optional(),
+  staleReviewHours: z.coerce
+    .number()
+    .positive('The stale threshold is a positive number of hours.'),
+  recentRetentionDays: z.coerce.number().int().min(1).max(60),
+  dailyReport: z.string().max(20_000),
+  reviewRequest: z.string().max(20_000),
+});
+
+/** Daily report window, thresholds and message templates. */
+export async function saveMessageSettingsAction(
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const parsed = MessageSettingsSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' };
+  const input = parsed.data;
+  const hours = Number(input.customHours);
+  if (input.mode === 'customHours' && !(hours > 0)) return { error: 'Enter the custom hours.' };
+  const since = input.sinceDate ? new Date(input.sinceDate) : null;
+  if (input.mode === 'sinceDate' && (!since || Number.isNaN(since.getTime()))) {
+    return { error: 'Pick the date and time to report since.' };
+  }
+  const profile = await requireProfile(input.profileId);
+  const tpl = (value: string, kind: 'daily-report' | 'review-request') =>
+    value.trim() ? value.replace(/\r\n/g, '\n') : DEFAULT_MESSAGE_TEMPLATES[kind];
+  const settings = parseProfileSettings({
+    ...profile.settings,
+    timeWindows: {
+      ...profile.settings.timeWindows,
+      dailyReport: {
+        mode: input.mode,
+        customHours: hours > 0 ? hours : undefined,
+        sinceDate: since && !Number.isNaN(since.getTime()) ? since.toISOString() : undefined,
+        mondayCoversWeekend: input.mondayCoversWeekend === 'on',
+      },
+      staleReviewHours: input.staleReviewHours,
+      recentRetentionDays: input.recentRetentionDays,
+    },
+    messageTemplates: {
+      'daily-report': tpl(input.dailyReport, 'daily-report'),
+      'review-request': tpl(input.reviewRequest, 'review-request'),
+    },
   });
   await updateProfile(await getDb(), profile.id, { settings });
   revalidatePath('/', 'layout');

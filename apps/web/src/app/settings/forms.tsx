@@ -1,7 +1,9 @@
 'use client';
 
 import {
+  DEFAULT_MESSAGE_TEMPLATES,
   DEFAULT_TEMPLATES,
+  MESSAGE_VARIABLES,
   SUGGESTION_KINDS,
   TEMPLATE_VARIABLES,
   type SuggestionKind,
@@ -12,6 +14,7 @@ import {
   deleteProfileAction,
   saveClaudeSettingsAction,
   saveConnectionsAction,
+  saveMessageSettingsAction,
   saveTemplatesAction,
   testConnectionsAction,
   type ActionResult,
@@ -284,6 +287,142 @@ export function TemplatesForm(props: {
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={pending}>
           Save templates
+        </Button>
+        <Result state={state} />
+      </div>
+    </form>
+  );
+}
+
+/** datetime-local wants "YYYY-MM-DDTHH:mm" in local time. */
+function toLocalInput(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function MessageSettingsForm(props: {
+  profileId: string;
+  window: {
+    mode: 'last24h' | 'sinceLastReport' | 'sinceDate' | 'customHours';
+    customHours?: number;
+    sinceDate?: string;
+    mondayCoversWeekend: boolean;
+  };
+  staleReviewHours: number;
+  recentRetentionDays: number;
+  templates: { 'daily-report': string; 'review-request': string };
+}) {
+  const [state, action, pending] = useActionState(saveMessageSettingsAction, {});
+  const [mode, setMode] = useState(props.window.mode);
+  const [daily, setDaily] = useState(props.templates['daily-report']);
+  const [review, setReview] = useState(props.templates['review-request']);
+  const resetHint = (
+    value: string,
+    kind: 'daily-report' | 'review-request',
+    set: (v: string) => void,
+  ) =>
+    value !== DEFAULT_MESSAGE_TEMPLATES[kind] ? (
+      <button
+        type="button"
+        className="underline-offset-2 hover:underline"
+        onClick={() => set(DEFAULT_MESSAGE_TEMPLATES[kind])}
+      >
+        Reset to default
+      </button>
+    ) : (
+      `Variables: ${MESSAGE_VARIABLES[kind].map((v) => `{{${v}}}`).join(' ')}. "# " lines are headings.`
+    );
+
+  return (
+    <form action={action} className="grid gap-4">
+      <input type="hidden" name="profileId" value={props.profileId} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Daily report covers">
+          <Select name="mode" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
+            <option value="last24h">The last 24 hours</option>
+            <option value="sinceLastReport">Since my last copied report</option>
+            <option value="customHours">A custom number of hours</option>
+            <option value="sinceDate">Since a date and time</option>
+          </Select>
+        </Field>
+        {mode === 'customHours' ? (
+          <Field label="Hours">
+            <Input
+              name="customHours"
+              type="number"
+              min={1}
+              defaultValue={props.window.customHours ?? 24}
+              className="w-24"
+            />
+          </Field>
+        ) : (
+          <input type="hidden" name="customHours" value={props.window.customHours ?? ''} />
+        )}
+        {mode === 'sinceDate' ? (
+          <Field label="Since">
+            <Input
+              name="sinceDate"
+              type="datetime-local"
+              defaultValue={toLocalInput(props.window.sinceDate)}
+            />
+          </Field>
+        ) : (
+          <input type="hidden" name="sinceDate" value={toLocalInput(props.window.sinceDate)} />
+        )}
+        <Checkbox
+          name="mondayCoversWeekend"
+          defaultChecked={props.window.mondayCoversWeekend}
+          label="On Mondays, cover since Friday"
+          hint="Applies to the 24-hour window and its fallbacks."
+        />
+        <Field
+          label="Stale review after (hours)"
+          hint="My MRs waiting longer are listed as blockers."
+        >
+          <Input
+            name="staleReviewHours"
+            type="number"
+            min={1}
+            step="1"
+            defaultValue={props.staleReviewHours}
+            className="w-24"
+          />
+        </Field>
+        <Field label="Recently completed (days)" hint="How long done work stays on the Now page.">
+          <Input
+            name="recentRetentionDays"
+            type="number"
+            min={1}
+            max={60}
+            defaultValue={props.recentRetentionDays}
+            className="w-24"
+          />
+        </Field>
+      </div>
+      <Field label="Daily report template" hint={resetHint(daily, 'daily-report', setDaily)}>
+        <textarea
+          name="dailyReport"
+          value={daily}
+          onChange={(e) => setDaily(e.target.value)}
+          rows={9}
+          className="w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs"
+        />
+      </Field>
+      <Field label="Review request template" hint={resetHint(review, 'review-request', setReview)}>
+        <textarea
+          name="reviewRequest"
+          value={review}
+          onChange={(e) => setReview(e.target.value)}
+          rows={4}
+          className="w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs"
+        />
+      </Field>
+      <div className="flex items-center gap-3">
+        <Button type="submit" disabled={pending}>
+          Save
         </Button>
         <Result state={state} />
       </div>

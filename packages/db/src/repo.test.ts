@@ -14,9 +14,12 @@ import {
   getSyncStates,
   hasPendingJob,
   listIssues,
+  lastDailyReportAt,
   listLinks,
   listManualLinks,
   listMergeRequests,
+  listMessages,
+  saveMessage,
   listProfiles,
   recordSync,
   replaceSyncedData,
@@ -178,6 +181,25 @@ describe('synced data', () => {
     expect(
       await changeManualLink(db, p, { mrKey: '42!404', issueKey: 'ABC-1', linked: true }, regex),
     ).toBe(false);
+  });
+
+  it('keeps the newest 30 copied messages per profile, without duplicates', async () => {
+    const p = await createProfile(db, { name: 'P' });
+    const other = await createProfile(db, { name: 'Q' });
+    await saveMessage(db, { profileId: other, kind: 'daily-report', format: 'slack', body: 'q' });
+    for (let i = 0; i < 32; i++) {
+      await saveMessage(db, { profileId: p, kind: 'daily-report', format: 'slack', body: `r${i}` });
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    expect(
+      await saveMessage(db, { profileId: p, kind: 'daily-report', format: 'slack', body: 'r31' }),
+    ).toMatchObject({ duplicate: true });
+    const history = await listMessages(db, p);
+    expect(history).toHaveLength(30);
+    expect(history[0]!.body).toBe('r31');
+    expect(history.at(-1)!.body).toBe('r2');
+    expect(await listMessages(db, other)).toHaveLength(1);
+    expect((await lastDailyReportAt(db, p))?.getTime()).toBe(history[0]!.createdAt.getTime());
   });
 
   it('records sync success and failure', async () => {

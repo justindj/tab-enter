@@ -12,6 +12,7 @@ import {
   type IssueTracker,
 } from '@tab-enter/connectors';
 import {
+  completedSyncDays,
   linkMergeRequest,
   mrKey,
   redactSecrets,
@@ -129,7 +130,7 @@ export async function syncProfile(db: Db, profileId: string, deps: SyncDeps): Pr
   if (!profile) return; // deleted while queued
   const now = deps.now ?? new Date();
   const { settings } = profile;
-  const since = new Date(now.getTime() - settings.timeWindows.recentRetentionDays * 86_400_000);
+  const since = new Date(now.getTime() - completedSyncDays(settings) * 86_400_000);
 
   let connectors: Awaited<ReturnType<typeof connectorsFor>>;
   try {

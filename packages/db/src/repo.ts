@@ -524,6 +524,88 @@ export async function listLinks(db: Db, profileId: string) {
     .where(eq(mrIssueLinks.profileId, profileId));
 }
 
+// ---------------------------------------------------------------- messages
+
+export const MESSAGE_HISTORY_LIMIT = 30;
+export type MessageRow = typeof messages.$inferSelect;
+
+/**
+ * Save a message the user copied, keeping the newest 30 per profile. Copying
+ * the same text again doesn't add a duplicate.
+ */
+export async function saveMessage(
+  db: Db,
+  msg: {
+    profileId: string;
+    kind: MessageRow['kind'];
+    format: MessageRow['format'];
+    body: string;
+    windowStart?: Date | null;
+    windowEnd?: Date | null;
+  },
+  userId = LOCAL_USER_ID,
+): Promise<{ id: string; duplicate: boolean }> {
+  const [latest] = await db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.profileId, msg.profileId), eq(messages.kind, msg.kind)))
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+  if (latest && latest.body === msg.body && latest.format === msg.format) {
+    return { id: latest.id, duplicate: true };
+  }
+  const id = randomUUID();
+  await db.transaction(async (tx) => {
+    await tx.insert(messages).values({
+      id,
+      userId,
+      profileId: msg.profileId,
+      kind: msg.kind,
+      format: msg.format,
+      body: msg.body,
+      windowStart: msg.windowStart ?? null,
+      windowEnd: msg.windowEnd ?? null,
+      createdAt: new Date(),
+    });
+    const keep = await tx
+      .select({ id: messages.id })
+      .from(messages)
+      .where(eq(messages.profileId, msg.profileId))
+      .orderBy(desc(messages.createdAt))
+      .limit(MESSAGE_HISTORY_LIMIT);
+    await tx.delete(messages).where(
+      and(
+        eq(messages.profileId, msg.profileId),
+        notInArray(
+          messages.id,
+          keep.map((k) => k.id),
+        ),
+      ),
+    );
+  });
+  return { id, duplicate: false };
+}
+
+export async function listMessages(db: Db, profileId: string): Promise<MessageRow[]> {
+  return db
+    .select()
+    .from(messages)
+    .where(eq(messages.profileId, profileId))
+    .orderBy(desc(messages.createdAt))
+    .limit(MESSAGE_HISTORY_LIMIT);
+}
+
+/** When the last daily report was copied, for the "since my last report" window. */
+export async function lastDailyReportAt(db: Db, profileId: string): Promise<Date | null> {
+  const [row] = await db
+    .select({ createdAt: messages.createdAt })
+    .from(messages)
+    .where(and(eq(messages.profileId, profileId), eq(messages.kind, 'daily-report')))
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+  return row?.createdAt ?? null;
+}
+
 // -------------------------------------------------------------------- runs
 
 export type RunRow = typeof agentRuns.$inferSelect;

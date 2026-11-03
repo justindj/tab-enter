@@ -311,6 +311,40 @@ Checked against docs.gitlab.com on 2026-11-02.
     telemetry switch also needs checking.
   - **Savings** from `rtk gain` aren't in the Usage panel yet.
 
+## Communication page (M4)
+
+- **Messages are built as structured items, then rendered** to Slack mrkdwn or plain text, so one
+  template serves both formats.
+  - **Slack:** `<url|text>` links, `•` bullets, `*Heading*`, and `& < >` escaped in text.
+  - **Plain text:** `text (url)`, `-` bullets, `Heading:`.
+  - **Templates** live in Settings. A `# ` line is a heading, and `{{done}}`, `{{inProgress}}`
+    and the like take pre-rendered lists.
+- **Daily report sections:**
+  - **Done:** tickets completed in the window, each with the MRs merged for it, then other merges.
+  - **In progress:** started tickets, with each open MR's status.
+  - **Next:** the top 3 suggestions from the Now page.
+  - **Blockers:** my MRs with a failing pipeline, conflicts, or awaiting review longer than the
+    stale threshold (counted from when the MR was opened), plus tickets in a blocked status.
+- **Windows use the machine's local time.** "On Mondays, cover since Friday" means the same time
+  on Friday, 72 hours back. "Since my last report" uses the last daily report you _copied_:
+  copying is the signal you sent it, not generating it. The page's window picker overrides the
+  window for one report through the URL.
+- **Done can only reach back as far as sync.** Completed tickets and merged MRs are now synced
+  for at least 7 days (`completedSyncDays`), even though Now still only shows the 3-day retention.
+  When a report's window starts earlier, the page says so.
+- **History saves on Copy**, not on generate. Copying the same text again doesn't add a
+  duplicate, and only the newest 30 per profile are kept.
+- **Polish with Claude** is a `short-text` run: one turn, haiku, no tools, in an empty scratch
+  folder rather than a worktree.
+  - **The prompt** wraps the message in `<message>` tags and asks Claude to keep every key, link
+    and number. The answer is unwrapped from code fences and tags.
+  - **Review:** the result replaces the text with an Undo, and the user reviews it before copying.
+  - **Gating:** the same as other runs.
+  - **Demo:** there's no recording of rewriting _this_ text, so the replay echoes it unchanged and
+    says so.
+- **Keyboard:** with a message card focused (Tab to it), `c` copies it. Typing in the text box
+  doesn't trigger it.
+
 ## Worker
 
 - **Non-run jobs run one at a time.** Since M3, agent runs have their own pool limited by

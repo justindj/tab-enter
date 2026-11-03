@@ -57,7 +57,12 @@ export async function executeRun(db: Db, runId: string, deps: AgentRunDeps): Pro
   // Where to work: a Continue reuses its parent's folder and session.
   let cwd = run.cwd;
   const notes: string[] = [];
-  if (!cwd) {
+  if (!cwd && !run.issueKey && !run.mrKey) {
+    // Text-only runs (report polish) need no repository: an empty scratch folder.
+    cwd = path.join(getProfileDir(profile.id), 'scratch');
+    await mkdir(cwd, { recursive: true });
+    await updateRun(db, runId, { cwd });
+  } else if (!cwd) {
     try {
       const ws = await resolveWorkspace(
         db,

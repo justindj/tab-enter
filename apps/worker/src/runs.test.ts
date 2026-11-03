@@ -4,7 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ReplayRunner, runCommand } from '@tab-enter/claude';
-import { DEFAULT_PRESETS, parseProfileSettings, type AgentEvent } from '@tab-enter/core';
+import {
+  cleanPolishResult,
+  DEFAULT_PRESETS,
+  parseProfileSettings,
+  polishPrompt,
+  type AgentEvent,
+} from '@tab-enter/core';
 import {
   createProfile,
   createRun,
@@ -167,6 +173,27 @@ describe('executeRun', () => {
     const [ev] = await listRunEvents(db, runId);
     expect(JSON.stringify(ev!.event)).not.toContain('glpat-abcdefghijklmnopqrstuvwx');
     expect((await getRun(db, runId))!.status).toBe('failed'); // no result event
+  });
+
+  it('runs a text-only polish in a scratch folder; the demo echoes the message', async () => {
+    const db = await createTestDb();
+    await ensureDemoProfile(db);
+    const profile = (await getActiveProfile(db))!;
+    const message = '*Done*\n• <https://jira.example.test/browse/A-1|A-1> Fix';
+    const runId = await createRun(db, {
+      profileId: profile.id,
+      preset: 'short-text',
+      prompt: polishPrompt(message, 'concise', 'slack'),
+      modelRequested: 'haiku',
+    });
+    await executeRun(db, runId, { fixturesDir, runner: () => replay(), pollMs: 20 });
+    const run = (await getRun(db, runId))!;
+    expect(run.status).toBe('succeeded');
+    expect(run.cwd).toMatch(/scratch$/);
+    const result = (await listRunEvents(db, runId))
+      .map((e) => e.event)
+      .find((e) => e.type === 'result');
+    expect(result?.type === 'result' && cleanPolishResult(result.resultText!)).toBe(message);
   });
 
   it('adds runs to usage totals', async () => {

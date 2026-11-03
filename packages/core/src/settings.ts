@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_MESSAGE_TEMPLATES } from './messages';
 import { DEFAULT_TEMPLATES } from './templates';
 
 // Per-profile settings. Secrets are never stored here: only the *names* of
@@ -193,6 +194,12 @@ export const ProfileSettingsSchema = z.object({
       'fix-pipeline': z.string().default(DEFAULT_TEMPLATES['fix-pipeline']),
       'resolve-conflicts': z.string().default(DEFAULT_TEMPLATES['resolve-conflicts']),
       review: z.string().default(DEFAULT_TEMPLATES.review),
+    })
+    .prefault({}),
+  messageTemplates: z
+    .object({
+      'daily-report': z.string().default(DEFAULT_MESSAGE_TEMPLATES['daily-report']),
+      'review-request': z.string().default(DEFAULT_MESSAGE_TEMPLATES['review-request']),
     })
     .prefault({}),
   reviewExcludeGlobs: z

@@ -13,6 +13,7 @@ import {
   ConnectionsForm,
   CreateProfileForm,
   DeleteProfileButton,
+  MessageSettingsForm,
   TemplatesForm,
 } from './forms';
 
@@ -249,6 +250,23 @@ export default async function SettingsPage() {
           description="Tokens and cost as Claude Code reported them, last 7 days, this profile."
         />
         <UsagePanel usage={usage} presets={s.claude.presets} />
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Messages and time windows"
+          description="The Communication page's daily report and review request."
+        />
+        <CardBody>
+          <MessageSettingsForm
+            key={active.id}
+            profileId={active.id}
+            window={s.timeWindows.dailyReport}
+            staleReviewHours={s.timeWindows.staleReviewHours}
+            recentRetentionDays={s.timeWindows.recentRetentionDays}
+            templates={s.messageTemplates}
+          />
+        </CardBody>
       </Card>
 
       <Card>

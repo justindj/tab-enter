@@ -34,7 +34,9 @@ describe('demo sync', () => {
     const issues = await listIssues(db, profile.id);
     expect(issues.map((i) => i.key)).toContain('SHOP-101');
     expect(issues.map((i) => i.key)).toContain('SHOP-099'); // recently completed
-    expect(issues.map((i) => i.key)).not.toContain('SHOP-096'); // outside retention
+    // Completed 6 days ago: past the 3-day display retention but inside the 7-day
+    // sync horizon that daily reports need (completedSyncDays).
+    expect(issues.map((i) => i.key)).toContain('SHOP-096');
 
     const mrs = await listMergeRequests(db, profile.id);
     expect(
