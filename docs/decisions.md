@@ -456,6 +456,55 @@ Checked against docs.gitlab.com on 2026-11-02.
 - **Verification jobs run in the same pool as Claude runs** (`maxParallelRuns` per profile), so a
   long walkthrough never blocks syncs.
 
+## Gated write actions (M7)
+
+- **Seven actions, each behind its own per-profile toggle, all off by default:**
+  - push a branch
+  - open an MR
+  - comment on an MR (as one comment, or on lines)
+  - approve an MR
+  - comment on a Jira ticket
+  - move a Jira ticket
+
+  Enabling a toggle only makes the button usable. Every use still opens a confirmation showing
+  exactly what will be sent (text, commits, target commit) and where.
+
+- **Log first, then write.**
+  - The web app writes a `pending` row to `write_action_log` with the confirmed payload and queues
+    a `write-action` job.
+  - The worker checks the toggle again, performs the write, and records `done` (with a URL or
+    message) or `failed` (with the error).
+  - Settings → Write log shows every attempt with its payload. The web app waits up to 90 s for the
+    outcome, so the result appears next to the button.
+- **Writes are never retried after a possible success.**
+  - The HTTP client's `write()` retries only a 429, since a rate-limited request wasn't processed.
+  - A 5xx or a dropped connection may already have posted, so the user decides whether to try
+    again.
+  - The job itself runs once.
+- **Push:**
+  - Runs `git push --porcelain -u origin refs/heads/<b>:refs/heads/<b>` with the user's own git
+    credentials. It never uses `--force` or `--force-with-lease`; a rejected push is reported.
+  - Refuses protected names (main, master, develop, release/*, production…), branches with unusual
+    characters, and a worktree whose HEAD isn't the run's branch.
+  - Claude Code still can't push: `git push` stays in `ALWAYS_DISALLOWED_TOOLS`. Only this
+    confirmed tab-enter action can.
+- **Unpushed work is recorded** after every task run: commits ahead of the upstream (or
+  origin's default branch) and the number of uncommitted files. The run page shows them, and the
+  push confirmation lists the commits.
+- **Approve sends `sha`** (the commit Claude reviewed), so GitLab refuses if the MR has moved on.
+  The confirmation warns when new commits arrived after the review, and when Claude recommended
+  requesting changes. Approval is still a human click, never automatic (spec 4.5).
+- **Line comments** use the MR's `diff_refs`. A line GitLab can't place on the diff is posted as a
+  general comment prefixed with `file:line`, rather than lost.
+- **Jira comments** are ADF on Cloud (one paragraph per line) and plain text on Data Center.
+  Transitions come from the ticket's own workflow (`GET …/transitions`) through a worker query job,
+  and the job row now has a `result` column for such reads.
+- **After approve, open MR or move ticket, a sync is queued** so the UI catches up.
+- **Demo profiles simulate writes.** Enabled actions are logged as "simulated, nothing was sent",
+  so the flows can be tried safely.
+- **GitLab tokens need the `api` scope** for any GitLab write. With `read_api` the write fails
+  with a 403 that says to check scopes.
+
 ## Worker
 
 - **Non-run jobs run one at a time.** Since M3, agent runs have their own pool limited by

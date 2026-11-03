@@ -22,6 +22,32 @@ export interface CodeHost {
   getMRDetail(ref: MRRef): Promise<MRDetail>;
 }
 
+// Write operations, used only by confirmed, logged write actions (M7).
+
+export interface CodeHostWriter {
+  postNote(ref: MRRef, body: string): Promise<{ url: string }>;
+  /** A comment on a diff line; throws when GitLab can't place it on the diff. */
+  postDiffNote(
+    ref: MRRef,
+    c: { file: string; line: number; body: string },
+  ): Promise<{ url: string }>;
+  /** Approve only if the MR head is still `sha`. */
+  approve(ref: MRRef, sha: string): Promise<void>;
+  createMergeRequest(input: {
+    projectId: string;
+    sourceBranch: string;
+    targetBranch: string;
+    title: string;
+    description: string;
+  }): Promise<{ url: string; iid: number }>;
+}
+
+export interface IssueTrackerWriter {
+  addComment(key: string, body: string): Promise<{ url: string }>;
+  listTransitions(key: string): Promise<{ id: string; name: string; to: string }[]>;
+  transition(key: string, transitionId: string): Promise<void>;
+}
+
 export type ConnectorErrorKind = 'auth' | 'network' | 'rate_limit' | 'not_found' | 'other';
 
 /** Errors the UI knows how to explain (expired token, VPN unreachable, ...). */

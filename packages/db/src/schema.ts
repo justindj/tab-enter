@@ -193,7 +193,13 @@ export const agentRuns = sqliteTable(
     modelUsed: text('model_used'),
     exitCode: integer('exit_code'),
     error: text('error'),
-    diffSummary: text('diff_summary', { mode: 'json' }).$type<{ filesChanged: string[] }>(),
+    diffSummary: text('diff_summary', { mode: 'json' }).$type<{
+      filesChanged: string[];
+      /** After a task run: local commits not on the remote yet ("abc1234 message"). */
+      commits?: string[];
+      /** After a task run: files with uncommitted changes in the worktree. */
+      uncommitted?: number;
+    }>(),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),
     cacheReadTokens: integer('cache_read_tokens'),
@@ -287,15 +293,31 @@ export const messages = sqliteTable(
 );
 
 /** Every write to Jira/GitLab or push: what, where, when. */
-export const writeActionLog = sqliteTable('write_action_log', {
-  id: id(),
-  userId: userId(),
-  profileId: profileId(),
-  action: text('action').notNull(),
-  target: text('target').notNull(),
-  summary: text('summary').notNull(),
-  createdAt: ts('created_at').notNull(),
-});
+export type WriteStatus = 'pending' | 'done' | 'failed';
+
+/** Every write to Jira/GitLab and every push: what, where, when, and how it went. */
+export const writeActionLog = sqliteTable(
+  'write_action_log',
+  {
+    id: id(),
+    userId: userId(),
+    profileId: profileId(),
+    /** WriteAction kind, e.g. "mr-approve". */
+    action: text('action').notNull(),
+    /** Human-readable target, e.g. "acme/shop!12" or "SHOP-101". */
+    target: text('target').notNull(),
+    summary: text('summary').notNull(),
+    /** The exact request the user confirmed (comment text, sha…). */
+    payload: text('payload', { mode: 'json' }).$type<unknown>(),
+    status: text('status').$type<WriteStatus>().notNull().default('done'),
+    /** e.g. { url } of the created note or MR. */
+    result: text('result', { mode: 'json' }).$type<{ url?: string; message?: string }>(),
+    error: text('error'),
+    createdAt: ts('created_at').notNull(),
+    finishedAt: ts('finished_at'),
+  },
+  (t) => [index('writes_profile_created_idx').on(t.profileId, t.createdAt)],
+);
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed';
 
@@ -313,6 +335,8 @@ export const jobs = sqliteTable(
     runAfter: ts('run_after').notNull(),
     lockedAt: ts('locked_at'),
     error: text('error'),
+    /** Output of query jobs (e.g. a ticket's available transitions). */
+    result: text('result', { mode: 'json' }).$type<unknown>(),
     createdAt: ts('created_at').notNull(),
     finishedAt: ts('finished_at'),
   },

@@ -1,6 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ClaudeCodeRunner, ReplayRunner, rtkRunSettings, summarizeEvents } from '@tab-enter/claude';
+import {
+  ClaudeCodeRunner,
+  findOnPath,
+  ReplayRunner,
+  rtkRunSettings,
+  runCommand,
+  summarizeEvents,
+} from '@tab-enter/claude';
 import {
   parseReviewResult,
   redactDeep,
@@ -22,6 +29,7 @@ import {
   type RunRow,
 } from '@tab-enter/db';
 import { resolveWorkspace, type WorkspaceDeps } from '../workspace';
+import { branchStatus } from '../worktree';
 import { prepareReview, type PreparedReview } from './review';
 
 export interface AgentRunDeps extends WorkspaceDeps {
@@ -227,6 +235,23 @@ export async function executeRun(db: Db, runId: string, deps: AgentRunDeps): Pro
   const result = summary.result;
   const usage = totalUsage(all);
   const status = cancelled ? 'cancelled' : result && !result.isError ? 'succeeded' : 'failed';
+
+  // Task runs in a worktree: note unpushed commits and uncommitted files, for
+  // the (gated) Push branch action and so nothing is silently left behind.
+  let branchInfo: { commits: string[]; uncommitted: number } | null = null;
+  const branch = (await getRun(db, runId))?.branch;
+  if (profile.isDemo && preset.mode === 'task' && result && !result.isError) {
+    // Demo: a pretend commit so the (simulated) Push / Open MR flow can be tried.
+    branchInfo = {
+      commits: [`0000000 (demo) ${run.issueKey ?? ''} changes`.trim()],
+      uncommitted: 0,
+    };
+  } else if (!profile.isDemo && preset.mode === 'task' && branch && !branch.startsWith('origin/')) {
+    const gitPath = await (deps.findGit ?? (() => findOnPath('git')))();
+    if (gitPath)
+      branchInfo = await branchStatus(deps.run ?? runCommand, gitPath, cwd).catch(() => null);
+  }
+
   await updateRun(db, runId, {
     status,
     sessionId: summary.sessionId ?? run.sessionId,
@@ -237,7 +262,7 @@ export async function executeRun(db: Db, runId: string, deps: AgentRunDeps): Pro
           result?.resultText ??
           `Run ended: ${result?.subtype ?? 'no result'}`)
         : null,
-    diffSummary: { filesChanged: summary.filesChanged },
+    diffSummary: { filesChanged: summary.filesChanged, ...(branchInfo ?? {}) },
     inputTokens: usage?.inputTokens ?? null,
     outputTokens: usage?.outputTokens ?? null,
     cacheReadTokens: usage?.cacheReadTokens ?? null,

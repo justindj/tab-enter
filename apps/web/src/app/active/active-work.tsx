@@ -28,6 +28,7 @@ import { Card, CardHeader } from '@/components/ui/card';
 import { Input, Select } from '@/components/ui/field';
 import { timeAgo } from '@/lib/format';
 import { useStoredState } from '@/lib/use-stored-state';
+import { MoveTicket } from './move-ticket';
 import { cn } from '@/lib/utils';
 
 export interface ActiveWorkProps {
@@ -38,6 +39,8 @@ export interface ActiveWorkProps {
   /** My open MRs, for the "link an MR" picker. */
   myOpenMRs: MRView[];
   sprintDefault: boolean;
+  /** Settings → Write actions → Move Jira tickets. */
+  allowTransition: boolean;
   now: string;
 }
 
@@ -118,6 +121,7 @@ export function ActiveWork(props: ActiveWorkProps) {
     now,
     myOpenMRs: props.myOpenMRs,
     link,
+    allowTransition: props.allowTransition,
   };
 
   return (
@@ -340,6 +344,7 @@ interface RowProps {
   now: Date;
   myOpenMRs: MRView[];
   link: ReturnType<typeof useLinkAction>;
+  allowTransition: boolean;
 }
 
 function IssueTable({
@@ -439,6 +444,7 @@ function IssueRow({
   now,
   myOpenMRs,
   link,
+  allowTransition,
 }: RowProps & { view: IssueView; showStatus: boolean; columns: number }) {
   const { issue } = view;
   const open = expanded.has(issue.key);
@@ -507,7 +513,13 @@ function IssueRow({
         <tr id={detailsId} className="border-b bg-muted/30">
           <td />
           <td colSpan={columns - 1} className="px-2 pt-1 pb-3">
-            <IssueDetails view={view} myOpenMRs={myOpenMRs} now={now} link={link} />
+            <IssueDetails
+              view={view}
+              myOpenMRs={myOpenMRs}
+              now={now}
+              link={link}
+              allowTransition={allowTransition}
+            />
           </td>
         </tr>
       )}
@@ -520,11 +532,13 @@ function IssueDetails({
   myOpenMRs,
   now,
   link,
+  allowTransition,
 }: {
   view: IssueView;
   myOpenMRs: MRView[];
   now: Date;
   link: RowProps['link'];
+  allowTransition: boolean;
 }) {
   const { issue, mrs } = view;
   const candidates = myOpenMRs.filter((m) => !m.issueKeys.includes(issue.key));
@@ -589,9 +603,15 @@ function IssueDetails({
         </form>
       )}
 
-      <p className="text-xs text-muted-foreground">
-        Claude Code runs for {issue.key} will show here once the runner lands (M3).
-      </p>
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <a
+          href={`/runs?issue=${encodeURIComponent(issue.key)}`}
+          className="text-muted-foreground underline-offset-2 hover:underline"
+        >
+          Claude Code runs for {issue.key}
+        </a>
+        <MoveTicket issueKey={issue.key} status={issue.status} allowed={allowTransition} />
+      </div>
     </div>
   );
 }

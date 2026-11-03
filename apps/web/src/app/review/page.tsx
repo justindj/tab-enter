@@ -151,6 +151,13 @@ export default async function CodeReviewPage({
                           runId={latest.runId}
                           reviewedSha={latest.reviewedSha}
                           when={timeAgo(latest.createdAt, now)}
+                          writes={{
+                            mrKey: v.key,
+                            headSha: mr.headSha,
+                            open,
+                            allowComment: active.settings.writeActions.gitlabComment,
+                            allowApprove: active.settings.writeActions.gitlabApprove,
+                          }}
                         />
                       </div>
                     </details>

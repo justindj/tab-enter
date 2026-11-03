@@ -6,10 +6,12 @@ import {
   formatReview,
   VERDICT_LABELS,
   type ReviewFinding,
+  type ReviewResult,
   type StoredReview,
   type Verdict,
 } from '@tab-enter/core';
-import { Check, Copy, Play, RefreshCw } from 'lucide-react';
+import { Check, Copy, MessageSquarePlus, Play, RefreshCw, ThumbsUp } from 'lucide-react';
+import { WriteButton } from '@/components/write-button';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useTransition } from 'react';
@@ -135,16 +137,151 @@ function Findings({
   );
 }
 
+interface Writes {
+  mrKey: string;
+  headSha: string;
+  open: boolean;
+  allowComment: boolean;
+  allowApprove: boolean;
+}
+
+const OFF = (name: string) => `“${name}” is off. Turn it on in Settings → Write actions.`;
+
+/** Post selected findings (one comment, or on their lines) and approve: all confirmed. */
+function ReviewWrites({
+  review,
+  reviewedSha,
+  writes,
+}: {
+  review: ReviewResult;
+  reviewedSha: string;
+  writes: Writes;
+}) {
+  const items = [
+    ...review.blockers.map((f) => ({ kind: 'Blocker', f })),
+    ...review.suggestions.map((f) => ({ kind: 'Suggestion', f })),
+    ...review.questions.map((q) => ({
+      kind: 'Question',
+      f: { reason: q, file: null, line: null },
+    })),
+  ];
+  const [selected, setSelected] = useState<Set<number>>(() => new Set(items.map((_, i) => i)));
+  const chosen = items.filter((_, i) => selected.has(i));
+  const lineItems = chosen.filter((c) => c.f.file && c.f.line);
+  const body = chosen.map((c) => `- **${c.kind}:** ${formatFinding(c.f)}`).join('\n');
+  const changed = writes.headSha !== reviewedSha;
+
+  if (!writes.open) return null;
+  return (
+    <div className="grid gap-2 border-t pt-3">
+      {items.length > 0 && (
+        <fieldset className="grid gap-1">
+          <legend className="mb-1 text-xs font-semibold">Post to GitLab</legend>
+          {items.map((c, i) => (
+            <label key={i} className="flex items-start gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={selected.has(i)}
+                onChange={() => {
+                  const next = new Set(selected);
+                  if (next.has(i)) next.delete(i);
+                  else next.add(i);
+                  setSelected(next);
+                }}
+                className="mt-0.5"
+              />
+              <span>
+                <strong>{c.kind}:</strong> {formatFinding(c.f)}
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        {items.length > 0 && (
+          <>
+            <WriteButton
+              label={`Post as one comment (${chosen.length})`}
+              icon={<MessageSquarePlus className="h-3.5 w-3.5" />}
+              enabled={writes.allowComment && chosen.length > 0}
+              disabledReason={
+                writes.allowComment
+                  ? 'Select at least one item.'
+                  : OFF('Post comments on merge requests')
+              }
+              title="Post this comment?"
+              where={`GitLab · ${writes.mrKey}`}
+              preview={body}
+              action={{ kind: 'mr-comment', mrKey: writes.mrKey, body }}
+            />
+            <WriteButton
+              label={`Post on lines (${lineItems.length})`}
+              icon={<MessageSquarePlus className="h-3.5 w-3.5" />}
+              enabled={writes.allowComment && lineItems.length > 0}
+              disabledReason={
+                writes.allowComment
+                  ? 'None of the selected items has a file and line.'
+                  : OFF('Post comments on merge requests')
+              }
+              title={`Post ${lineItems.length} line comment${lineItems.length === 1 ? '' : 's'}?`}
+              where={`GitLab · ${writes.mrKey}`}
+              preview={lineItems
+                .map((c) => `${c.f.file}:${c.f.line}\n  ${c.kind}: ${c.f.reason}`)
+                .join('\n\n')}
+              action={{
+                kind: 'mr-diff-comments',
+                mrKey: writes.mrKey,
+                comments: lineItems.map((c) => ({
+                  file: c.f.file!,
+                  line: c.f.line!,
+                  body: `**${c.kind}:** ${c.f.reason}`,
+                })),
+              }}
+            />
+          </>
+        )}
+        <WriteButton
+          label="Approve"
+          icon={<ThumbsUp className="h-3.5 w-3.5" />}
+          variant={review.verdict === 'request_changes' ? 'outline' : 'default'}
+          enabled={writes.allowApprove}
+          disabledReason={OFF('Approve merge requests')}
+          title={`Approve ${writes.mrKey}?`}
+          where={`GitLab · ${writes.mrKey}`}
+          preview={
+            <>
+              Approving commit <code>{reviewedSha.slice(0, 12)}</code>. If the MR has moved on
+              since, GitLab refuses and nothing is approved.
+              {changed && (
+                <p className="mt-2 text-warning">
+                  New commits arrived after this review (head {writes.headSha.slice(0, 12)}).
+                  Re-review first, or this approval will be refused.
+                </p>
+              )}
+              {review.verdict === 'request_changes' && (
+                <p className="mt-2 text-danger">Claude recommended requesting changes.</p>
+              )}
+            </>
+          }
+          action={{ kind: 'mr-approve', mrKey: writes.mrKey, sha: reviewedSha }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function ReviewResultView({
   result,
   runId,
   reviewedSha,
   when,
+  writes,
 }: {
   result: StoredReview;
   runId: string | null;
   reviewedSha: string;
   when: string;
+  writes?: Writes;
 }) {
   const { review } = result;
   return (
@@ -201,6 +338,9 @@ export function ReviewResultView({
           </pre>
           {result.raw && <CopyButton text={result.raw} label="Copy text" />}
         </div>
+      )}
+      {review && writes && (
+        <ReviewWrites review={review} reviewedSha={reviewedSha} writes={writes} />
       )}
       {(result.excludedFiles.length > 0 || result.truncated) && (
         <p className="text-xs text-muted-foreground">

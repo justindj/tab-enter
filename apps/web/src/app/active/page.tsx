@@ -20,6 +20,7 @@ export default async function ActiveWorkPage() {
         unlinked={workspace.unlinkedMRs}
         myOpenMRs={workspace.inFlight}
         sprintDefault={active.settings.jira.sprintOnlyDefault}
+        allowTransition={active.settings.writeActions.jiraTransition}
         now={now.toISOString()}
       />
     </div>

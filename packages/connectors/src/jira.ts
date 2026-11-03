@@ -1,7 +1,7 @@
 import type { Issue, IssueComment, IssueDetail, StatusCategory, User } from '@tab-enter/core';
 import { HttpClient, type HttpClientOptions } from './http';
 import { extractAcceptanceCriteria, jiraText } from './jira-text';
-import { ConnectorError, type IssueTracker } from './types';
+import { ConnectorError, type IssueTracker, type IssueTrackerWriter } from './types';
 
 // Jira Cloud and Data Center, read-only.
 //
@@ -73,7 +73,7 @@ export function jqlString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-export class JiraIssueTracker implements IssueTracker {
+export class JiraIssueTracker implements IssueTracker, IssueTrackerWriter {
   private readonly http: HttpClient;
   private readonly api: string;
   private readonly now: () => Date;
@@ -150,6 +150,44 @@ export class JiraIssueTracker implements IssueTracker {
   async rankNextCandidates(): Promise<Issue[]> {
     const active = await this.listMyActiveIssues({ sprintOnly: true });
     return active.filter((i) => i.statusCategory === 'todo');
+  }
+
+  // ------------------------------------------------------------ writes (M7)
+
+  /** Cloud wants ADF (one paragraph per line); Data Center takes plain wiki text. */
+  async addComment(key: string, body: string): Promise<{ url: string }> {
+    const payload =
+      this.opts.deployment === 'cloud'
+        ? {
+            body: {
+              type: 'doc',
+              version: 1,
+              content: body.split('\n').map((line) => ({
+                type: 'paragraph',
+                content: line ? [{ type: 'text', text: line }] : [],
+              })),
+            },
+          }
+        : { body };
+    const { data } = await this.http.write<{ id?: string }>(
+      `${this.api}/issue/${encodeURIComponent(key)}/comment`,
+      payload,
+    );
+    const anchor = data?.id ? `?focusedCommentId=${data.id}` : '';
+    return { url: `${this.http.baseUrl}/browse/${key}${anchor}` };
+  }
+
+  async listTransitions(key: string): Promise<{ id: string; name: string; to: string }[]> {
+    const { data } = await this.http.get<{
+      transitions?: { id: string; name: string; to?: { name?: string } }[];
+    }>(`${this.api}/issue/${encodeURIComponent(key)}/transitions`);
+    return (data.transitions ?? []).map((t) => ({ id: t.id, name: t.name, to: t.to?.name ?? '' }));
+  }
+
+  async transition(key: string, transitionId: string): Promise<void> {
+    await this.http.write(`${this.api}/issue/${encodeURIComponent(key)}/transitions`, {
+      transition: { id: transitionId },
+    });
   }
 
   // ------------------------------------------------------------ internals

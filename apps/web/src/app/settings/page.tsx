@@ -1,5 +1,11 @@
 import { formatWatchedProjects, type ToolStatus } from '@tab-enter/core';
-import { getDb, usageSummary, type UsageRow, type UsageSummary } from '@tab-enter/db';
+import {
+  getDb,
+  listWriteActions,
+  usageSummary,
+  type UsageRow,
+  type UsageSummary,
+} from '@tab-enter/db';
 import { EmptyState } from '@/components/empty-state';
 import type { ReactNode } from 'react';
 import { requestToolDetection } from '@/app/actions';
@@ -16,6 +22,7 @@ import {
   MessageSettingsForm,
   TemplatesForm,
   VerificationSettingsForm,
+  WriteActionsForm,
 } from './forms';
 
 function ToolRow({
@@ -121,12 +128,11 @@ function UsagePanel({
 export default async function SettingsPage() {
   const { profiles, active, tools, now } = await loadApp();
   const s = active.settings;
-  const usage = await usageSummary(
-    await getDb(),
-    active.id,
-    new Date(now.getTime() - 7 * 86_400_000),
-    now,
-  );
+  const db = await getDb();
+  const [usage, writes] = await Promise.all([
+    usageSummary(db, active.id, new Date(now.getTime() - 7 * 86_400_000), now),
+    listWriteActions(db, active.id, 50),
+  ]);
 
   return (
     <div className="mx-auto grid max-w-4xl gap-5">
@@ -319,19 +325,59 @@ export default async function SettingsPage() {
           description="Anything that writes to Jira or GitLab is off by default and always asks for confirmation."
         />
         <CardBody>
-          <ul className="grid gap-1 text-sm sm:grid-cols-2">
-            {Object.entries(s.writeActions).map(([name, on]) => (
-              <li
-                key={name}
-                className="flex items-center justify-between rounded border px-3 py-1.5"
-              >
-                <span>{name.replace(/([A-Z])/g, ' $1').toLowerCase()}</span>
-                <Badge tone={on ? 'warning' : 'muted'}>{on ? 'On' : 'Off'}</Badge>
+          <WriteActionsForm
+            key={active.id}
+            profileId={active.id}
+            values={s.writeActions}
+            isDemo={active.isDemo}
+          />
+        </CardBody>
+      </Card>
+
+      <Card id="write-log">
+        <CardHeader
+          title="Write log"
+          description="Every write tab-enter made (or tried) for this profile: what, where, when, and the exact payload."
+        />
+        {writes.length === 0 ? (
+          <EmptyState title="Nothing written yet" />
+        ) : (
+          <ul className="divide-y">
+            {writes.map((w) => (
+              <li key={w.id} className="px-4 py-2 text-sm">
+                <details>
+                  <summary className="flex cursor-pointer flex-wrap items-center gap-2">
+                    <Badge
+                      tone={
+                        w.status === 'done' ? 'success' : w.status === 'failed' ? 'danger' : 'info'
+                      }
+                    >
+                      {w.status === 'done' ? 'Done' : w.status === 'failed' ? 'Failed' : 'Pending'}
+                    </Badge>
+                    <span className="min-w-0 flex-1">
+                      {w.summary} <span className="text-muted-foreground">· {w.target}</span>
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {w.createdAt.toLocaleString()}
+                    </span>
+                  </summary>
+                  <div className="mt-2 grid gap-1 text-xs">
+                    {w.result?.message && <p>{w.result.message}</p>}
+                    {w.result?.url && (
+                      <a href={w.result.url} target="_blank" rel="noreferrer" className="underline">
+                        {w.result.url}
+                      </a>
+                    )}
+                    {w.error && <p className="text-danger">{w.error}</p>}
+                    <pre className="max-h-60 overflow-auto rounded bg-muted p-2 whitespace-pre-wrap">
+                      {JSON.stringify(w.payload, null, 2)}
+                    </pre>
+                  </div>
+                </details>
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-xs text-muted-foreground">These become configurable in M7.</p>
-        </CardBody>
+        )}
       </Card>
     </div>
   );

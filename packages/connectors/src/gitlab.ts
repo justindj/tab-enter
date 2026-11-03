@@ -11,7 +11,7 @@ import {
   type WatchedProject,
 } from '@tab-enter/core';
 import { HttpClient, mapLimit, type HttpClientOptions } from './http';
-import { ConnectorError, type CodeHost } from './types';
+import { ConnectorError, type CodeHost, type CodeHostWriter } from './types';
 
 // GitLab (gitlab.com or self-managed), REST v4, read-only. A read_api token is
 // enough. List endpoints don't include the head pipeline, approvals or thread
@@ -55,7 +55,7 @@ interface GlMR {
   merge_status?: string;
   has_conflicts?: boolean;
   sha?: string | null;
-  diff_refs?: { head_sha?: string } | null;
+  diff_refs?: { head_sha?: string; base_sha?: string; start_sha?: string } | null;
   head_pipeline?: { id?: number; status?: string } | null;
   references?: { full?: string };
   created_at: string;
@@ -176,7 +176,7 @@ export function countUnresolved(discussions: GlDiscussion[]): number {
   return discussions.filter((d) => (d.notes ?? []).some((n) => n.resolvable && !n.resolved)).length;
 }
 
-export class GitLabCodeHost implements CodeHost {
+export class GitLabCodeHost implements CodeHost, CodeHostWriter {
   private readonly http: HttpClient;
   private me: Promise<GlUser> | null = null;
 
@@ -258,6 +258,67 @@ export class GitLabCodeHost implements CodeHost {
           };
         }),
     };
+  }
+
+  // ------------------------------------------------------------ writes (M7)
+
+  async postNote(ref: MRRef, body: string): Promise<{ url: string }> {
+    const [mr, note] = await Promise.all([
+      this.single(ref),
+      this.http.write<{ id: number }>(`${this.mrPath(ref)}/notes`, { body }),
+    ]);
+    return { url: `${mr.web_url}#note_${note.data.id}` };
+  }
+
+  async postDiffNote(
+    ref: MRRef,
+    c: { file: string; line: number; body: string },
+  ): Promise<{ url: string }> {
+    const mr = await this.single(ref);
+    const refs = mr.diff_refs;
+    if (!refs?.head_sha || !refs.base_sha || !refs.start_sha) {
+      throw new ConnectorError('other', 'GitLab returned no diff refs for this MR.');
+    }
+    const { data } = await this.http.write<{ notes?: { id: number }[] }>(
+      `${this.mrPath(ref)}/discussions`,
+      {
+        body: c.body,
+        position: {
+          position_type: 'text',
+          base_sha: refs.base_sha,
+          start_sha: refs.start_sha,
+          head_sha: refs.head_sha,
+          new_path: c.file,
+          old_path: c.file,
+          new_line: c.line,
+        },
+      },
+    );
+    const id = data.notes?.[0]?.id;
+    return { url: id ? `${mr.web_url}#note_${id}` : mr.web_url };
+  }
+
+  async approve(ref: MRRef, sha: string): Promise<void> {
+    await this.http.write(`${this.mrPath(ref)}/approve`, { sha });
+  }
+
+  async createMergeRequest(input: {
+    projectId: string;
+    sourceBranch: string;
+    targetBranch: string;
+    title: string;
+    description: string;
+  }): Promise<{ url: string; iid: number }> {
+    const { data } = await this.http.write<{ web_url: string; iid: number }>(
+      `/projects/${encodeURIComponent(input.projectId)}/merge_requests`,
+      {
+        source_branch: input.sourceBranch,
+        target_branch: input.targetBranch,
+        title: input.title,
+        description: input.description,
+      },
+    );
+    return { url: data.web_url, iid: data.iid };
   }
 
   // ------------------------------------------------------------ internals

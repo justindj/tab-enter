@@ -14,7 +14,7 @@ import { Card, CardHeader } from '@/components/ui/card';
 import { loadApp } from '@/lib/data';
 import { timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { CopySummary, VerifyControls } from './controls';
+import { CopySummary, PostSummary, VerifyControls } from './controls';
 import { STATUS } from './status';
 
 const FILTERS = ['all', 'not_run', 'running', 'passed', 'issues_found', 'needs_coverage'] as const;
@@ -132,6 +132,15 @@ export default async function VerificationPage({
                         </Link>
                       )}
                       {v.summary && <CopySummary text={v.summary} />}
+                      {v.summary && v.status !== 'running' && v.status !== 'failed' && (
+                        <PostSummary
+                          summary={v.summary}
+                          mrKey={v.mrKey}
+                          issueKey={issue.key}
+                          allowGitlab={active.settings.writeActions.gitlabComment}
+                          allowJira={active.settings.writeActions.jiraComment}
+                        />
+                      )}
                       {v.error && <span className="text-danger">{v.error}</span>}
                       {v.criteria && (
                         <span className="flex flex-wrap gap-1">

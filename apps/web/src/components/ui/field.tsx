@@ -1,14 +1,15 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
+import type { ComponentProps, InputHTMLAttributes, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 const control =
   'h-8 w-full rounded-md border bg-background px-2 text-sm placeholder:text-muted-foreground disabled:opacity-50';
 
-export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+// ComponentProps includes `ref` (React 19 passes it as a prop).
+export function Input({ className, ...props }: ComponentProps<'input'>) {
   return <input className={cn(control, className)} {...props} />;
 }
 
-export function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+export function Select({ className, ...props }: ComponentProps<'select'>) {
   return <select className={cn(control, 'pr-6', className)} {...props} />;
 }
 

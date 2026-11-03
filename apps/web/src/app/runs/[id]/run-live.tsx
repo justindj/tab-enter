@@ -2,6 +2,7 @@
 
 import type { AgentEvent } from '@tab-enter/core';
 import { Ban, Check, Copy, CornerDownRight, SquareTerminal } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, useTransition } from 'react';
 import type { ActionResult } from '@/app/actions';
 import {
@@ -37,6 +38,14 @@ export function RunLive({
   const [pending, startTransition] = useTransition();
   const logRef = useRef<HTMLOListElement>(null);
   const live = run.status === 'queued' || run.status === 'running';
+
+  // When the run finishes, re-render the page (branch status, Push / Open MR).
+  const router = useRouter();
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (wasLive.current && !live) router.refresh();
+    wasLive.current = live;
+  }, [live, router]);
 
   // Poll for new events while the run is live.
   const lastSeq = events.at(-1)?.seq ?? -1;

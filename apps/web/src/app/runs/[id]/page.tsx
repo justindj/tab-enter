@@ -4,7 +4,14 @@ import { notFound } from 'next/navigation';
 import { Card, CardHeader } from '@/components/ui/card';
 import { loadApp } from '@/lib/data';
 import { timeAgo } from '@/lib/format';
+import type { AgentEvent } from '@tab-enter/core';
+import { BranchActions } from './branch-actions';
 import { RunLive } from './run-live';
+
+function lastResult(events: AgentEvent[]): string | null {
+  const result = events.findLast((e) => e.type === 'result');
+  return result?.type === 'result' ? result.resultText : null;
+}
 
 export default async function RunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -62,6 +69,35 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
           {run.prompt}
         </pre>
       </Card>
+
+      {run.branch &&
+        run.status !== 'queued' &&
+        run.status !== 'running' &&
+        preset?.mode === 'task' && (
+          <Card>
+            <BranchActions
+              runId={run.id}
+              branch={run.branch}
+              commits={run.diffSummary?.commits ?? []}
+              uncommitted={run.diffSummary?.uncommitted ?? 0}
+              hasMr={!!run.mrKey}
+              allowPush={active.settings.writeActions.gitPush}
+              allowOpenMr={active.settings.writeActions.openMergeRequest}
+              defaults={{
+                title: issue
+                  ? `${issue.key} ${issue.summary}`
+                  : (run.prompt.split('\n')[0] ?? '').slice(0, 120),
+                description: [
+                  issue ? `Closes ${issue.key}: ${issue.url}` : '',
+                  lastResult(events.map((e) => e.event)) ?? '',
+                ]
+                  .filter(Boolean)
+                  .join('\n\n'),
+                targetBranch: 'main',
+              }}
+            />
+          </Card>
+        )}
 
       <RunLive
         key={run.id}

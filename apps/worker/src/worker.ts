@@ -23,6 +23,7 @@ import { detectTools } from './handlers/detect-tools';
 import { openTerminal, type OpenTerminalDeps } from './handlers/open-terminal';
 import { syncProfile } from './handlers/sync';
 import { executeVerification, type VerifyDeps } from './handlers/verify';
+import { executeWriteAction, listJiraTransitions, type WriteDeps } from './handlers/write-action';
 import { FileBlobStore } from '@tab-enter/db/blob-store';
 import type { SecretStore } from '@tab-enter/secrets';
 
@@ -38,13 +39,20 @@ export interface WorkerDeps {
   run?: Omit<AgentRunDeps, 'fixturesDir'>;
   terminal?: OpenTerminalDeps;
   verify?: Partial<Omit<VerifyDeps, 'fixturesDir'>>;
+  write?: Partial<WriteDeps>;
 }
 
 /** Long jobs that run in the pool beside syncs. */
 const POOLED: JobType[] = ['agent-run', 'verify'];
 
-async function dispatch(db: Db, job: Job, deps: WorkerDeps): Promise<void> {
+/** Handlers resolve to nothing, or to a result stored on the job (query jobs). */
+async function dispatch(db: Db, job: Job, deps: WorkerDeps): Promise<unknown> {
+  const writeDeps = { credentials: deps.credentials, fetch: deps.fetch, ...deps.write };
   switch (job.type) {
+    case 'write-action':
+      return executeWriteAction(db, job, writeDeps);
+    case 'jira-transitions':
+      return listJiraTransitions(db, job, writeDeps);
     case 'detect-tools':
       return detectTools(db);
     case 'sync':
@@ -89,8 +97,8 @@ export async function startNextJob(
   const started = Date.now();
   const done = (async () => {
     try {
-      await dispatch(db, parsed.data, deps);
-      await finishJob(db, row.id);
+      const result = await dispatch(db, parsed.data, deps);
+      await finishJob(db, row.id, undefined, result ?? null);
       log(`job ${row.type} done in ${Date.now() - started}ms`);
     } catch (err) {
       const message = redactSecrets(err instanceof Error ? err.message : String(err));

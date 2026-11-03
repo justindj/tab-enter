@@ -166,6 +166,32 @@ export async function ensureWorktree(
   return { cwd: dir, branch, warnings };
 }
 
+/**
+ * Local commits not on the remote yet (against the branch's upstream, else
+ * origin's default branch) and the number of files with uncommitted changes.
+ */
+export async function branchStatus(
+  run: RunCommand,
+  gitPath: string,
+  cwd: string,
+): Promise<{ commits: string[]; uncommitted: number } | null> {
+  const git = (args: string[]) => run(gitPath, ['-C', cwd, ...args], { timeoutMs: 30_000 });
+  const upstream = await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
+  let base = upstream.code === 0 ? upstream.stdout.trim() : '';
+  if (!base)
+    base = await defaultBase((c, a) => run(gitPath, ['-C', c, ...a], { timeoutMs: 30_000 }), cwd);
+  const log = await git(['log', '--oneline', '--no-decorate', '-n', '20', `${base}..HEAD`]);
+  const status = await git(['status', '--porcelain']);
+  if (log.code !== 0 || status.code !== 0) return null;
+  return {
+    commits: log.stdout
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean),
+    uncommitted: status.stdout.split('\n').filter((l) => l.trim()).length,
+  };
+}
+
 /** `git worktree list --porcelain` → paths and their branches (short names). */
 export function parseWorktreeList(output: string): { path: string; branch: string | null }[] {
   return output

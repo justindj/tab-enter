@@ -290,11 +290,75 @@ export async function getJob(db: Db, id: string): Promise<JobRow | null> {
   return row ?? null;
 }
 
-export async function finishJob(db: Db, id: string, error?: string): Promise<void> {
+export async function finishJob(
+  db: Db,
+  id: string,
+  error?: string,
+  result?: unknown,
+): Promise<void> {
   await db
     .update(jobs)
-    .set({ status: error ? 'failed' : 'done', error: error ?? null, finishedAt: new Date() })
+    .set({
+      status: error ? 'failed' : 'done',
+      error: error ?? null,
+      result: result ?? null,
+      finishedAt: new Date(),
+    })
     .where(eq(jobs.id, id));
+}
+
+// ----------------------------------------------------------- write actions
+
+export type WriteActionRow = typeof writeActionLog.$inferSelect;
+
+/** Log a confirmed write as pending; the worker job then performs it. */
+export async function createWriteAction(
+  db: Db,
+  w: { profileId: string; action: string; target: string; summary: string; payload: unknown },
+  userId = LOCAL_USER_ID,
+): Promise<string> {
+  const id = randomUUID();
+  await db.insert(writeActionLog).values({
+    id,
+    userId,
+    ...w,
+    status: 'pending',
+    createdAt: new Date(),
+  });
+  return id;
+}
+
+export async function getWriteAction(db: Db, id: string): Promise<WriteActionRow | null> {
+  const [row] = await db.select().from(writeActionLog).where(eq(writeActionLog.id, id));
+  return row ?? null;
+}
+
+export async function finishWriteAction(
+  db: Db,
+  id: string,
+  outcome: { result: { url?: string; message?: string } } | { error: string },
+): Promise<void> {
+  await db
+    .update(writeActionLog)
+    .set(
+      'error' in outcome
+        ? { status: 'failed', error: outcome.error, finishedAt: new Date() }
+        : { status: 'done', result: outcome.result, finishedAt: new Date() },
+    )
+    .where(eq(writeActionLog.id, id));
+}
+
+export async function listWriteActions(
+  db: Db,
+  profileId: string,
+  limit = 50,
+): Promise<WriteActionRow[]> {
+  return db
+    .select()
+    .from(writeActionLog)
+    .where(eq(writeActionLog.profileId, profileId))
+    .orderBy(desc(writeActionLog.createdAt))
+    .limit(limit);
 }
 
 /** Requeue jobs left "running" by a worker that died. */

@@ -9,6 +9,10 @@ export const JobSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('delete-profile-files'), profileId: z.string() }),
   /** Execute a queued agent_runs row (the row holds the prompt and preset). */
   z.object({ type: z.literal('agent-run'), profileId: z.string(), runId: z.string() }),
+  /** Execute a confirmed write (its write_action_log row holds the payload). */
+  z.object({ type: z.literal('write-action'), profileId: z.string(), actionId: z.string() }),
+  /** Read a ticket's available workflow transitions (result on the job row). */
+  z.object({ type: z.literal('jira-transitions'), profileId: z.string(), issueKey: z.string() }),
   /** Verify a ticket: walkthrough or test evidence, assessed, rendered as a slideshow. */
   z.object({
     type: z.literal('verify'),

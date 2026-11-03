@@ -6,7 +6,9 @@ import {
   MESSAGE_VARIABLES,
   SUGGESTION_KINDS,
   TEMPLATE_VARIABLES,
+  WRITE_SETTING_LABELS,
   type SuggestionKind,
+  type WriteSetting,
 } from '@tab-enter/core';
 import { useActionState, useTransition, useState } from 'react';
 import {
@@ -16,6 +18,7 @@ import {
   saveConnectionsAction,
   saveMessageSettingsAction,
   saveTemplatesAction,
+  saveWriteActionsAction,
   testConnectionsAction,
   type ActionResult,
   type ConnectionTestResult,
@@ -367,6 +370,45 @@ export function VerificationSettingsForm(props: {
         label="Record video of walkthroughs"
         hint="Off by default: screenshots are smaller and faster."
       />
+      <div className="flex items-center gap-3">
+        <Button type="submit" disabled={pending}>
+          Save
+        </Button>
+        <Result state={state} />
+      </div>
+    </form>
+  );
+}
+
+export function WriteActionsForm(props: {
+  profileId: string;
+  values: Record<WriteSetting, boolean>;
+  isDemo: boolean;
+}) {
+  const [state, action, pending] = useActionState(saveWriteActionsAction, {});
+  return (
+    <form action={action} className="grid gap-3">
+      <input type="hidden" name="profileId" value={props.profileId} />
+      {props.isDemo && (
+        <p className="text-xs text-muted-foreground">
+          In the demo, enabled writes are simulated and logged; nothing is sent anywhere.
+        </p>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(Object.keys(WRITE_SETTING_LABELS) as WriteSetting[]).map((key) => (
+          <Checkbox
+            key={key}
+            name={key}
+            defaultChecked={props.values[key]}
+            label={WRITE_SETTING_LABELS[key].label}
+            hint={WRITE_SETTING_LABELS[key].hint}
+          />
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Enabled writes still ask you to confirm each time, showing exactly what is sent and where.
+        Claude Code itself can never push or write to GitLab or Jira.
+      </p>
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={pending}>
           Save

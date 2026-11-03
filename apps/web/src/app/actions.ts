@@ -343,6 +343,26 @@ export async function saveMessageSettingsAction(
   return { ok: 'Saved.' };
 }
 
+/** Write-action toggles. Each stays off unless ticked here. */
+export async function saveWriteActionsAction(
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const profile = await requireProfile(String(formData.get('profileId') ?? ''));
+  const writeActions = Object.fromEntries(
+    Object.keys(profile.settings.writeActions).map((k) => [k, formData.get(k) === 'on']),
+  );
+  const settings = parseProfileSettings({ ...profile.settings, writeActions });
+  await updateProfile(await getDb(), profile.id, { settings });
+  revalidatePath('/', 'layout');
+  const on = Object.values(writeActions).filter(Boolean).length;
+  return {
+    ok: on
+      ? `Saved. ${on} write action${on === 1 ? '' : 's'} enabled.`
+      : 'Saved. All writes are off.',
+  };
+}
+
 const template = z.string().max(20_000);
 const TemplatesSchema = z.object({
   profileId: z.string(),

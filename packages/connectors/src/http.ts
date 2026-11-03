@@ -81,6 +81,15 @@ export class HttpClient {
     return this.request<T>('POST', path, { body });
   }
 
+  /**
+   * A request that changes something (comment, approve, create). Only a 429
+   * is retried: after a 5xx or a dropped connection the write may already
+   * have happened, and retrying could post it twice.
+   */
+  async write<T>(path: string, body: unknown) {
+    return this.request<T>('POST', path, { body, idempotent: false });
+  }
+
   /** A plain-text endpoint (e.g. a CI job log). Same retries and error mapping. */
   async getText(path: string): Promise<string> {
     const res = await this.request<string>('GET', path, { text: true });
@@ -94,7 +103,13 @@ export class HttpClient {
       query,
       body,
       text = false,
-    }: { query?: Record<string, string | number | undefined>; body?: unknown; text?: boolean } = {},
+      idempotent = true,
+    }: {
+      query?: Record<string, string | number | undefined>;
+      body?: unknown;
+      text?: boolean;
+      idempotent?: boolean;
+    } = {},
   ): Promise<HttpResponse<T>> {
     const url = new URL(this.opts.baseUrl + path);
     for (const [k, v] of Object.entries(query ?? {})) {
@@ -120,18 +135,20 @@ export class HttpClient {
           redirect: 'follow',
         });
       } catch (err) {
-        if (attempt < maxRetries) {
+        if (idempotent && attempt < maxRetries) {
           await this.sleep(retryAfterMs(null, attempt));
           continue;
         }
         throw new ConnectorError('network', networkMessage(service, this.opts.baseUrl, err));
       }
 
-      if (RETRY_STATUS.has(res.status) && attempt < maxRetries) {
+      const retryable = idempotent ? RETRY_STATUS.has(res.status) : res.status === 429;
+      if (retryable && attempt < maxRetries) {
         await this.sleep(retryAfterMs(res.headers.get('Retry-After'), attempt));
         continue;
       }
       if (!res.ok) throw await this.toError(res);
+      if (res.status === 204) return { data: null as T, headers: res.headers };
       if (text) return { data: (await res.text()) as T, headers: res.headers };
 
       const type = res.headers.get('Content-Type') ?? '';

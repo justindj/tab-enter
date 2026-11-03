@@ -96,6 +96,27 @@ Runs can commit locally but never push. Pushing and opening MRs are separate, co
 UI walkthroughs need Claude Code approved for the client, since Claude writes the steps. Backend
 verification and re-runs work without it, but criteria are then marked from evidence only.
 
+## Write to GitLab and Jira (optional)
+
+Everything is read-only until you opt in. In Settings → **Write actions**, tick only what you
+want:
+
+- **Push branches:** pushes a run's branch with your own git credentials. It never force-pushes
+  and never pushes main/master.
+- **Open merge requests, post comments, approve:** need a GitLab token with the **`api`** scope
+  (replace the `read_api` token in Connections).
+- **Comment on / move Jira tickets:** need a Jira token that can edit the tickets.
+
+Each action still asks you to confirm, showing exactly what will be sent. Every attempt, with its
+payload and outcome, is listed under Settings → **Write log**.
+
+Where the buttons are:
+
+- **Run page:** Push branch, Open merge request.
+- **Code Review page:** post the selected findings (as one comment, or on lines), and Approve.
+- **Verification page:** Post to MR, Post to Jira.
+- **Active Work page:** Move ticket.
+
 ## Environment variables
 
 | Variable               | Default                    | Purpose                                                             |

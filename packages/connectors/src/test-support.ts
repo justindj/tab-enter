@@ -26,6 +26,7 @@ export interface FakeReply {
 }
 
 export function jsonResponse({ status = 200, body, headers = {}, text }: FakeReply): Response {
+  if (status === 204) return new Response(null, { status, headers });
   if (text) {
     return new Response(String(body), {
       status,

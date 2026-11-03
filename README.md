@@ -45,7 +45,8 @@ fixtures/         Invented demo data and recorded Claude Code output
 | M4 Communication page       | Done                                                        |
 | M5 Code Review page         | Done                                                        |
 | M6 Verification             | Done                                                        |
-| M7 Gated write actions      | Next                                                        |
+| M7 Gated write actions      | Done                                                        |
+| Later                       | Slack (read-only), Azure DevOps, GitHub, `npx` distribution |
 
 ## License
 

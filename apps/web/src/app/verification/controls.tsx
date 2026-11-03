@@ -5,6 +5,7 @@ import { useState, useTransition } from 'react';
 import type { ActionResult } from '@/app/actions';
 import { Button } from '@/components/ui/button';
 import { Select } from '@/components/ui/field';
+import { WriteButton } from '@/components/write-button';
 import { startVerificationAction } from './actions';
 
 export function VerifyControls({
@@ -55,6 +56,49 @@ export function VerifyControls({
         </span>
       )}
     </span>
+  );
+}
+
+/** Post the verification summary to the MR and/or the Jira ticket (gated, confirmed). */
+export function PostSummary({
+  summary,
+  mrKey,
+  issueKey,
+  allowGitlab,
+  allowJira,
+}: {
+  summary: string;
+  mrKey: string | null;
+  issueKey: string;
+  allowGitlab: boolean;
+  allowJira: boolean;
+}) {
+  const off = (name: string) => `“${name}” is off. Turn it on in Settings → Write actions.`;
+  return (
+    <>
+      {mrKey && (
+        <WriteButton
+          label="Post to MR"
+          variant="ghost"
+          enabled={allowGitlab}
+          disabledReason={off('Post comments on merge requests')}
+          title="Post the verification summary on the merge request?"
+          where={`GitLab · ${mrKey}`}
+          preview={summary}
+          action={{ kind: 'mr-comment', mrKey, body: summary }}
+        />
+      )}
+      <WriteButton
+        label="Post to Jira"
+        variant="ghost"
+        enabled={allowJira}
+        disabledReason={off('Comment on Jira tickets')}
+        title={`Comment on ${issueKey}?`}
+        where={`Jira · ${issueKey}`}
+        preview={summary}
+        action={{ kind: 'jira-comment', issueKey, body: summary }}
+      />
+    </>
   );
 }
 
