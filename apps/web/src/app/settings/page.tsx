@@ -12,6 +12,7 @@ import type { ReactNode } from 'react';
 import { requestToolDetection } from '@/app/actions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ClaudeLoginButton } from '@/components/login-buttons';
 import { ThemePicker } from '@/components/shell/theme-picker';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { loadApp } from '@/lib/data';
@@ -51,6 +52,7 @@ function ToolRow({
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{name}</span>
         {badge}
+        {status?.tool === 'claude' && status.installed && !status.loggedIn && <ClaudeLoginButton />}
         {status?.tool === 'claude' && status.installed && (
           <Badge
             tone={status.loggedIn ? 'success' : status.loggedIn === false ? 'danger' : 'muted'}

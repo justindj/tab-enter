@@ -600,6 +600,36 @@ Checked against docs.gitlab.com on 2026-11-02.
     stay the user's job in a terminal; the step shows the detected status, with Re-check.
   - **Finish:** removes the demo profile by default (a checkbox), queues a sync, and opens Now.
 
+## Sign-in shortcuts
+
+- **tab-enter keeps its own Jira and GitLab tokens.** It doesn't borrow logins that Claude Code
+  holds (Atlassian or GitLab connections live inside Claude Code, so other programs can't read
+  them), for two reasons:
+  - **Cost and reliability:** syncing through Claude would spend tokens every few minutes and
+    give nondeterministic results.
+  - **Separation:** Claude never seeing tokens is a hard rule (spec 4.6).
+- **Log in to Claude Code:** a button (Setup's Claude step, and Settings → Tools while logged out)
+  queues a `claude-login` job.
+  - **What it does:** the worker opens the user's terminal running `claude auth login`, the same
+    launcher as Open in terminal. Sign-in needs a person at the browser, so tab-enter only starts
+    it.
+  - **Afterwards:** the page re-runs tool detection every 4 s for up to 3 minutes and updates when
+    the CLI reports a login.
+- **Import token from glab:** a button in the GitLab connection form queues `import-glab-token`.
+  - **Reading the token:** the worker reads the token glab uses for the profile's saved GitLab
+    host: `glab config get token --host <host>` first, else `glab auth status --hostname <host>
+--show-token` (for tokens glab keeps in the OS keyring).
+  - **Checking it:** `GET /user` with the token. A rejected token is reported, and the stored one
+    is left alone.
+  - **Storing it:** in the keychain.
+  - **Where the token never goes:** the job's result (only host and username), the browser and the
+    logs. The error text has the token masked.
+  - **The one place the worker writes a secret.** The worker's secret writer accepts only the
+    `gitlab-token` name; everything else is still written only by the web app.
+- **Jira has no shortcut.** Atlassian API tokens can't be created through an API, and OAuth (3LO)
+  needs a registered Atlassian app with a client secret, which a local open-source tool can't ship.
+  The token link plus paste stays.
+
 ## Worker
 
 - **Non-run jobs run one at a time.** Since M3, agent runs have their own pool limited by

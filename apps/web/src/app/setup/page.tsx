@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import Link from 'next/link';
 import { requestToolDetection } from '@/app/actions';
 import { ConnectionsForm } from '@/app/settings/forms';
+import { ClaudeLoginButton } from '@/components/login-buttons';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -191,19 +192,23 @@ export default async function SetupPage({
                 </>
               )}
             </div>
-            {(!claude?.installed || claude.loggedIn === false) && (
+            {!claude?.installed && (
               <ol className="list-decimal pl-5 text-sm">
-                {!claude?.installed && (
-                  <li>
-                    Install the Claude Code CLI so <code>claude --version</code> works in a new
-                    terminal. The copy inside the Claude desktop app doesn’t count.
-                  </li>
-                )}
                 <li>
-                  Run <code>claude auth login</code> in a terminal.
+                  Install the Claude Code CLI so <code>claude --version</code> works in a new
+                  terminal. The copy inside the Claude desktop app doesn’t count.
                 </li>
-                <li>Click Re-check above.</li>
+                <li>Click Re-check above, then log in.</li>
               </ol>
+            )}
+            {claude?.installed && !claude.loggedIn && (
+              <div className="grid gap-1">
+                <ClaudeLoginButton />
+                <p className="text-xs text-muted-foreground">
+                  Opens a terminal running <code>claude auth login</code>; finish in your browser.
+                  This page notices when you’re signed in.
+                </p>
+              </div>
             )}
             <form action={setupClaudeAction} className="grid gap-3 border-t pt-3">
               <Checkbox

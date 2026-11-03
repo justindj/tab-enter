@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url';
 import { fakeFetch, loadContractFixture } from '@tab-enter/connectors/test-support';
 import { parseProfileSettings } from '@tab-enter/core';
 import {
+  addSecretName,
+  getProfile,
   updateProfile,
   type Db,
   createProfile,
@@ -209,9 +211,11 @@ describe('live sync', () => {
     expect(states.find((s) => s.source === 'gitlab')?.lastError).toBeNull();
   });
 
-  it('records a clear error when no token is stored', async () => {
+  it('records a clear error when a saved token has gone from the keychain', async () => {
     const db = await createTestDb();
     const { id } = await liveProfile(db);
+    await addSecretName(db, id, SECRET_NAMES.jiraToken);
+    await addSecretName(db, id, SECRET_NAMES.gitlabToken);
     const credentials = new PatCredentialProvider(new MemorySecretStore(), async () =>
       parseProfileSettings({}),
     );
@@ -220,6 +224,28 @@ describe('live sync', () => {
     ).rejects.toThrow(/No Jira token/);
     const states = await getSyncStates(db, id);
     expect(states.find((s) => s.source === 'gitlab')?.lastError).toMatch(/No GitLab token/);
+  });
+
+  it('treats services not set up yet as quiet, not failed', async () => {
+    const db = await createTestDb();
+    const { id } = await liveProfile(db);
+    await addSecretName(db, id, SECRET_NAMES.gitlabToken); // GitLab set up, Jira not yet
+    const store = new MemorySecretStore();
+    await store.set(id, SECRET_NAMES.gitlabToken, 'gitlab-secret');
+    const settings = (await getProfile(db, id))!.settings;
+    const credentials = new PatCredentialProvider(store, async () => settings);
+    await syncProfile(db, id, { fixturesDir, credentials, fetch: server().fetch, now });
+    const states = await getSyncStates(db, id);
+    expect(states.every((s) => s.lastError === null)).toBe(true);
+    expect((await listMergeRequests(db, id)).length).toBe(4);
+
+    // Nothing set up at all: no errors, no throw.
+    const fresh = await createProfile(db, { name: 'New' });
+    const none = new PatCredentialProvider(new MemorySecretStore(), async () =>
+      parseProfileSettings({}),
+    );
+    await syncProfile(db, fresh, { fixturesDir, credentials: none, fetch: server().fetch, now });
+    expect((await getSyncStates(db, fresh)).every((s) => s.lastError === null)).toBe(true);
   });
 });
 

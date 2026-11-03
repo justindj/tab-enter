@@ -23,6 +23,7 @@ import {
   type ActionResult,
   type ConnectionTestResult,
 } from '@/app/actions';
+import { GlabImportButton } from '@/components/login-buttons';
 import { Button } from '@/components/ui/button';
 import { Checkbox, Field, Input, Select } from '@/components/ui/field';
 import { saveVerificationSettingsAction } from '@/app/verification/actions';
@@ -209,6 +210,10 @@ export function ConnectionsForm(props: {
               placeholder={stored('gitlab-token') ? '••••••••' : ''}
             />
           </Field>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>Already logged in with the glab CLI?</span>
+          <GlabImportButton profileId={props.profileId} />
         </div>
         <Field
           label="Watched projects (optional)"

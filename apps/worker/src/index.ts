@@ -11,7 +11,12 @@ import {
   requeueStaleJobs,
 } from '@tab-enter/db';
 import { ensureDataDir, runMigrations } from '@tab-enter/db/migrate';
-import { createSecretStore, PatCredentialProvider, type SecretStore } from '@tab-enter/secrets';
+import {
+  createSecretStore,
+  PatCredentialProvider,
+  SECRET_NAMES,
+  type SecretStore,
+} from '@tab-enter/secrets';
 import { getFixturesDir } from './paths';
 import { processNextJob, RunPool, scheduleDueSyncs } from './worker';
 
@@ -35,27 +40,40 @@ async function main() {
 
   // Opened lazily: a missing keychain only matters once a live profile syncs.
   let store: Promise<SecretStore> | null = null;
+  const openStore = () =>
+    (store ??= createSecretStore({
+      dataDir: getDataDir(),
+      passphrase: process.env.TAB_ENTER_PASSPHRASE,
+    }).catch((err: unknown) => {
+      store = null;
+      throw err;
+    }));
   const lazyStore: SecretStore = {
     kind: 'keychain',
-    get: async (profileId, name) => {
-      store ??= createSecretStore({
-        dataDir: getDataDir(),
-        passphrase: process.env.TAB_ENTER_PASSPHRASE,
-      }).catch((err: unknown) => {
-        store = null;
-        throw err;
-      });
-      return (await store).get(profileId, name);
-    },
+    get: async (profileId, name) => (await openStore()).get(profileId, name),
     set: () => Promise.reject(new Error('The worker never writes secrets.')),
     delete: () => Promise.reject(new Error('The worker never deletes secrets.')),
+  };
+  // The single exception: importing a GitLab token from glab, at the user's request.
+  const gitlabTokenWriter: Pick<SecretStore, 'set'> = {
+    set: async (profileId, name, value) => {
+      if (name !== SECRET_NAMES.gitlabToken)
+        throw new Error('The worker only writes GitLab tokens.');
+      return (await openStore()).set(profileId, name, value);
+    },
   };
   const credentials = new PatCredentialProvider(
     lazyStore,
     async (profileId) => (await getProfile(db, profileId))?.settings ?? defaultProfileSettings(),
   );
 
-  const deps = { fixturesDir: getFixturesDir(), credentials, secrets: lazyStore, log };
+  const deps = {
+    fixturesDir: getFixturesDir(),
+    credentials,
+    secrets: lazyStore,
+    gitlabTokenWriter,
+    log,
+  };
   let stopping = false;
   const stop = () => {
     stopping = true;

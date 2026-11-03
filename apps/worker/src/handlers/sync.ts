@@ -19,6 +19,7 @@ import {
   type CredentialProvider,
   type IssueDetail,
 } from '@tab-enter/core';
+import { MissingCredentialError, SECRET_NAMES } from '@tab-enter/secrets';
 import {
   getProfile,
   listIssues,
@@ -148,11 +149,29 @@ export async function syncProfile(db: Db, profileId: string, deps: SyncDeps): Pr
     Promise.resolve().then(() => syncIssues(connectors.tracker(), since)),
     Promise.resolve().then(() => syncMergeRequests(connectors.host(), since)),
   ]);
+  // A service the user hasn't set up yet (no token ever saved) isn't a failure.
+  // A saved token that has gone missing from the keychain still is.
+  const notSetUp = (result: PromiseSettledResult<unknown>, secret: string, hasUrl = true) =>
+    result.status === 'rejected' &&
+    (!hasUrl ||
+      (result.reason instanceof MissingCredentialError && !profile.secretNames.includes(secret)));
+  const jiraOff = notSetUp(issuesResult, SECRET_NAMES.jiraToken, !!settings.jira.baseUrl);
+  const gitlabOff = notSetUp(mrsResult, SECRET_NAMES.gitlabToken);
+  if (jiraOff) await recordSync(db, profileId, 'jira', {});
+  if (gitlabOff) await recordSync(db, profileId, 'gitlab', {});
+  if (jiraOff && gitlabOff) return;
   if (issuesResult.status === 'rejected' && mrsResult.status === 'rejected') {
-    await recordSync(db, profileId, 'jira', { error: errorMessage(issuesResult.reason) });
-    await recordSync(db, profileId, 'gitlab', { error: errorMessage(mrsResult.reason) });
+    if (!jiraOff)
+      await recordSync(db, profileId, 'jira', { error: errorMessage(issuesResult.reason) });
+    if (!gitlabOff)
+      await recordSync(db, profileId, 'gitlab', { error: errorMessage(mrsResult.reason) });
     throw new Error(
-      `Jira: ${errorMessage(issuesResult.reason)} GitLab: ${errorMessage(mrsResult.reason)}`,
+      [
+        jiraOff ? '' : `Jira: ${errorMessage(issuesResult.reason)}`,
+        gitlabOff ? '' : `GitLab: ${errorMessage(mrsResult.reason)}`,
+      ]
+        .filter(Boolean)
+        .join(' '),
     );
   }
 
@@ -199,23 +218,25 @@ export async function syncProfile(db: Db, profileId: string, deps: SyncDeps): Pr
 
   await replaceSyncedData(db, profileId, { issues, mergeRequests, links });
 
-  await recordSync(
-    db,
-    profileId,
-    'jira',
-    issuesResult.status === 'fulfilled' ? {} : { error: errorMessage(issuesResult.reason) },
-  );
+  if (!jiraOff)
+    await recordSync(
+      db,
+      profileId,
+      'jira',
+      issuesResult.status === 'fulfilled' ? {} : { error: errorMessage(issuesResult.reason) },
+    );
   // Token expiry (for the header warning); best effort, demo hosts can't say.
   const tokenExpiresAt =
     mrsResult.status === 'fulfilled' && !profile.isDemo
       ? await (connectors.host().getTokenExpiry?.() ?? Promise.resolve(null)).catch(() => null)
       : undefined;
-  await recordSync(
-    db,
-    profileId,
-    'gitlab',
-    mrsResult.status === 'fulfilled'
-      ? { tokenExpiresAt }
-      : { error: errorMessage(mrsResult.reason) },
-  );
+  if (!gitlabOff)
+    await recordSync(
+      db,
+      profileId,
+      'gitlab',
+      mrsResult.status === 'fulfilled'
+        ? { tokenExpiresAt }
+        : { error: errorMessage(mrsResult.reason) },
+    );
 }

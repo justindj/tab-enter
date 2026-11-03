@@ -63,6 +63,10 @@ The setup wizard walks through this. To add another client later, or change anyt
      days before a token expires.
    - **GitLab:** base URL (gitlab.com or self-managed) and a personal access token with `read_api`
      scope. Write actions (M7) need `api` scope.
+     - **Already logged in with the `glab` CLI?** Save the base URL, then click **Import token
+       from glab**. tab-enter checks the token works for that GitLab, then stores it in your
+       keychain, so there's nothing to paste. Write actions still need that token to have the
+       `api` scope.
    - **Watched projects** (optional): one `group/project` path or numeric id per line, optionally
      `= C:\path\to\clone`. Empty means MRs from every project.
 3. Click **Save**. Tokens go to your OS keychain (macOS Keychain, Windows Credential Manager, or
@@ -77,8 +81,10 @@ it turns red with the reason.
 
 ## Run Claude Code from tab-enter
 
-1. Install the Claude Code CLI so `claude` is on PATH, and run `claude auth login`. Click
-   **Re-check** in Settings → Tools.
+1. Install the Claude Code CLI so `claude` is on PATH, then log in in either of two ways:
+   - Click **Log in to Claude Code** (Setup, or Settings → Tools). It opens a terminal running
+     `claude auth login`, and the page updates once you've finished in the browser.
+   - Run `claude auth login` yourself, then click **Re-check**.
 2. In Settings → Connections → **Watched projects**, add each project with its local clone:
    `group/project = C:\code\project`. Runs never touch that checkout. They work in a git
    worktree next to it, under `.tab-enter-worktrees/`.

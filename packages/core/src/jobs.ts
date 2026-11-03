@@ -23,6 +23,14 @@ export const JobSchema = z.discriminatedUnion('type', [
     /** Re-run the saved walkthrough instead of asking Claude for a new one. */
     rerun: z.boolean(),
   }),
+  /** Open a terminal running `claude auth login` (the user finishes in their browser). */
+  z.object({ type: z.literal('claude-login') }),
+  /**
+   * Copy the GitLab token the glab CLI is logged in with (for the profile's
+   * GitLab host) into the keychain, after checking it works. The token never
+   * appears in the job's result.
+   */
+  z.object({ type: z.literal('import-glab-token'), profileId: z.string() }),
   /** Remove tab-enter worktrees whose MR merged or closed; ask about ones with local work. */
   z.object({ type: z.literal('cleanup-worktrees'), profileId: z.string() }),
   /** The user confirmed removing a worktree that has local work (worktrees row). */

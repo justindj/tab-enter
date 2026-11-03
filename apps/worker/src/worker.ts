@@ -20,6 +20,7 @@ import {
 } from '@tab-enter/db';
 import { executeRun, type AgentRunDeps } from './handlers/agent-run';
 import { cleanupWorktrees, removeWorktree } from './handlers/cleanup-worktrees';
+import { claudeLogin, importGlabToken, type GlabImportDeps } from './handlers/cli-logins';
 import { deleteProfileFiles } from './handlers/delete-profile-files';
 import { detectTools } from './handlers/detect-tools';
 import { openTerminal, type OpenTerminalDeps } from './handlers/open-terminal';
@@ -42,6 +43,12 @@ export interface WorkerDeps {
   terminal?: OpenTerminalDeps;
   verify?: Partial<Omit<VerifyDeps, 'fixturesDir'>>;
   write?: Partial<WriteDeps>;
+  /**
+   * The worker's one way to write a secret: a profile's GitLab token, when the
+   * user asks to import it from glab. Every other write is the web app's.
+   */
+  gitlabTokenWriter?: Pick<SecretStore, 'set'>;
+  glab?: Partial<GlabImportDeps>;
 }
 
 /** Long jobs that run in the pool beside syncs. */
@@ -70,6 +77,14 @@ async function dispatch(db: Db, job: Job, deps: WorkerDeps): Promise<unknown> {
       )
         await enqueueJob(db, { type: 'cleanup-worktrees', profileId: job.profileId });
       return;
+    case 'claude-login':
+      return claudeLogin(deps.terminal);
+    case 'import-glab-token':
+      return importGlabToken(db, job, {
+        fetch: deps.fetch,
+        secrets: deps.gitlabTokenWriter,
+        ...deps.glab,
+      });
     case 'cleanup-worktrees':
       return cleanupWorktrees(db, job.profileId, deps.run);
     case 'remove-worktree':

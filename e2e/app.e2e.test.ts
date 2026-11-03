@@ -179,6 +179,9 @@ describe('tab-enter in demo mode', () => {
     await page.getByRole('button', { name: 'Create profile and continue' }).click();
     await page.waitForURL(`${base}/setup?step=connect`);
     await page.getByRole('heading', { name: 'Connect Jira and GitLab' }).waitFor();
+    // The glab import goes through the worker and reports back (glab is absent or logged out here).
+    await page.getByRole('button', { name: 'Import token from glab' }).click();
+    await page.getByRole('alert').filter({ hasText: /glab/ }).waitFor({ timeout: 60_000 });
     await page.getByRole('link', { name: 'Next: Claude Code' }).click();
     await page.waitForURL(`${base}/setup?step=claude`);
     await page.getByRole('button', { name: 'Save and continue' }).click();
