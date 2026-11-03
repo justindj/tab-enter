@@ -13,12 +13,18 @@ working on, what's waiting on me, what do I tell my team, and what do I need to 
 
 ## Quick start
 
+Needs Node.js 22+, pnpm 10 (`npm install -g pnpm@10`) and Git. For AI features, install the
+Claude Code CLI and run `claude auth login`.
+
 ```bash
+git clone https://github.com/justindj/tab-enter.git
+cd tab-enter
 pnpm install
 pnpm dev
 ```
 
-This opens a demo profile with invented data. See [docs/setup.md](docs/setup.md) for requirements
+This opens a demo profile with invented data. Your profiles, tokens and history live on each
+machine (`~/.tab-enter` and the OS keychain), so a new machine starts fresh. See [docs/setup.md](docs/setup.md) for requirements
 and connecting real clients, and [docs/decisions.md](docs/decisions.md) for design decisions.
 
 ## Layout
