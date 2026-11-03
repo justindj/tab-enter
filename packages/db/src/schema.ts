@@ -161,6 +161,8 @@ export const syncState = sqliteTable(
     lastError: text('last_error'),
     /** Provider-specific incremental cursor (e.g. max `updated` seen). */
     cursor: text('cursor'),
+    /** Token expiry as the service reports it (GitLab), ISO date; null when unknown. */
+    tokenExpiresAt: text('token_expires_at'),
   },
   (t) => [primaryKey({ columns: [t.profileId, t.source] })],
 );
@@ -317,6 +319,40 @@ export const writeActionLog = sqliteTable(
     finishedAt: ts('finished_at'),
   },
   (t) => [index('writes_profile_created_idx').on(t.profileId, t.createdAt)],
+);
+
+/**
+ * removed: cleaned up after its MR merged or closed. needs_confirmation: has
+ * uncommitted or unpushed work, so it waits for the user. kept: the user chose
+ * to keep it; it isn't asked about again.
+ */
+export type WorktreeStatus = 'removed' | 'needs_confirmation' | 'kept';
+
+/** tab-enter-managed worktrees the cleanup has acted on or is asking about. */
+export const worktrees = sqliteTable(
+  'worktrees',
+  {
+    id: id(),
+    userId: userId(),
+    profileId: profileId(),
+    path: text('path').notNull(),
+    /** The user's clone this worktree belongs to. */
+    clonePath: text('clone_path').notNull(),
+    branch: text('branch'),
+    mrKey: text('mr_key'),
+    /** "merged" or "closed": why it's up for cleanup. */
+    reason: text('reason').notNull(),
+    status: text('status').$type<WorktreeStatus>().notNull(),
+    uncommitted: integer('uncommitted').notNull().default(0),
+    /** One-line commits not on any remote. */
+    unpushed: text('unpushed', { mode: 'json' })
+      .$type<string[]>()
+      .notNull()
+      .$defaultFn(() => []),
+    error: text('error'),
+    updatedAt: ts('updated_at').notNull(),
+  },
+  (t) => [uniqueIndex('worktrees_profile_path_idx').on(t.profileId, t.path)],
 );
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed';

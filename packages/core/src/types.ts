@@ -147,4 +147,6 @@ export interface ToolStatus {
   loggedIn: boolean | null;
   detail: string | null;
   checkedAt: string;
+  /** RTK only: lifetime savings from `rtk gain` (its own estimates). */
+  savings?: { commands: number; inputTokens: number; savedTokens: number; avgPct: number } | null;
 }

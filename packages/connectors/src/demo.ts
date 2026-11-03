@@ -161,4 +161,10 @@ export class DemoCodeHost implements CodeHost {
     const { role: _r, ...detail } = mr;
     return detail;
   }
+
+  /** Invented but stable figures, so the demo slideshow shows a coverage line. */
+  async getCoverage(ref: MRRef) {
+    const base = 78 + (ref.iid % 7);
+    return { head: base + ((ref.iid % 3) - 1) * 0.4, base };
+  }
 }

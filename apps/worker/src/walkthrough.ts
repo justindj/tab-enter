@@ -158,17 +158,8 @@ export async function runWalkthrough(
   return outcomes;
 }
 
-/**
- * Start the app under test with the project's start command (in the worktree)
- * and wait until the base URL answers. Returns a stop function.
- */
-export async function startApp(
-  command: string,
-  cwd: string,
-  baseUrl: string,
-  { timeoutMs = 120_000, env = process.env }: { timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
-): Promise<{ stop: () => void; output: () => string }> {
-  // The user's own configured command, so it runs through their shell.
+/** Spawn the user's own configured command through their shell, in its own process group. */
+function spawnShell(command: string, cwd: string, env: NodeJS.ProcessEnv) {
   const child: ChildProcess = spawn(command, {
     cwd,
     shell: true,
@@ -179,39 +170,90 @@ export async function startApp(
   let output = '';
   child.stdout?.on('data', (d: Buffer) => (output = (output + d.toString()).slice(-4000)));
   child.stderr?.on('data', (d: Buffer) => (output = (output + d.toString()).slice(-4000)));
-  let exited: number | null = null;
-  child.on('exit', (code) => (exited = code ?? -1));
+  const exit = new Promise<number>((resolve) => child.on('exit', (code) => resolve(code ?? -1)));
 
-  const stop = () => {
-    if (child.exitCode !== null || !child.pid) return;
-    if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
-    } else {
-      try {
-        process.kill(-child.pid, 'SIGTERM');
-      } catch {
-        child.kill('SIGTERM');
+  /** Kill the whole process tree and wait (up to 10 s) for it to go. */
+  const stop = async () => {
+    if (child.exitCode === null && child.pid) {
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
+      } else {
+        try {
+          process.kill(-child.pid, 'SIGTERM');
+        } catch {
+          child.kill('SIGTERM');
+        }
       }
     }
+    await Promise.race([exit, new Promise((r) => setTimeout(r, 10_000))]);
   };
+  return { child, exit, stop, output: () => output };
+}
+
+/**
+ * Run a command (the repo's own Playwright tests) to completion in its shell.
+ * Never throws for a failing exit code; the caller reads the report.
+ */
+export async function runShell(
+  command: string,
+  cwd: string,
+  { timeoutMs = 600_000, env = process.env }: { timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ code: number; timedOut: boolean; output: string }> {
+  const proc = spawnShell(command, cwd, env);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void proc.stop();
+  }, timeoutMs);
+  const code = await proc.exit;
+  clearTimeout(timer);
+  return { code, timedOut, output: proc.output() };
+}
+
+/** Wait until nothing answers on the URL any more (a stopped app releasing its port). */
+export async function waitUntilDown(url: string, timeoutMs = 15_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      await fetch(url, { signal: AbortSignal.timeout(1500), redirect: 'manual' });
+    } catch {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+/**
+ * Start the app under test with the project's start command (in the worktree)
+ * and wait until the base URL answers. Returns a stop function.
+ */
+export async function startApp(
+  command: string,
+  cwd: string,
+  baseUrl: string,
+  { timeoutMs = 120_000, env = process.env }: { timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ stop: () => Promise<void>; output: () => string }> {
+  const { exit, stop, output } = spawnShell(command, cwd, env);
+  let exited: number | null = null;
+  void exit.then((code) => (exited = code));
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (exited !== null) {
       throw new WalkthroughError(
-        `The start command exited (code ${exited}) before ${baseUrl} answered. Output: ${output.slice(-800)}`,
+        `The start command exited (code ${exited}) before ${baseUrl} answered. Output: ${output().slice(-800)}`,
       );
     }
     try {
       const res = await fetch(baseUrl, { signal: AbortSignal.timeout(3000), redirect: 'manual' });
-      if (res.status < 500) return { stop, output: () => output };
+      if (res.status < 500) return { stop, output };
     } catch {
       // not up yet
     }
     await new Promise((r) => setTimeout(r, 1000));
   }
-  stop();
+  await stop();
   throw new WalkthroughError(
-    `${baseUrl} didn't answer within ${Math.round(timeoutMs / 1000)}s of "${command}". Output: ${output.slice(-800)}`,
+    `${baseUrl} didn't answer within ${Math.round(timeoutMs / 1000)}s of "${command}". Output: ${output().slice(-800)}`,
   );
 }

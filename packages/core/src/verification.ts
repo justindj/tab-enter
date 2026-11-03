@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { truncate } from './context';
+import { stripAnsi, truncate } from './context';
+import { globToRegExp } from './review';
 import type { IssueDetail, MergeRequest, PipelineFailure } from './types';
 
 // Verification (spec 4.3). A UI walkthrough is a small JSON list of browser
@@ -155,6 +156,21 @@ export interface StepOutcome {
   error?: string;
   /** Screenshot file name in the run folder, if one was taken. */
   screenshot?: string;
+  /** The same screenshot step on the target branch ("before"), when captured. */
+  beforeScreenshot?: string;
+}
+
+/** Results of the client repo's own Playwright tests (spec command). */
+export interface SpecRunResult {
+  command: string;
+  passed: number;
+  failed: number;
+  skipped: number;
+  tests: { title: string; status: 'passed' | 'failed' | 'skipped'; error?: string }[];
+  /** Screenshot file names (in the run folder) attached by the tests. */
+  screenshots: string[];
+  /** Set when the command couldn't run or its report couldn't be read. */
+  error?: string;
 }
 
 export interface Evidence {
@@ -165,6 +181,105 @@ export interface Evidence {
   steps: StepOutcome[];
   /** Why the walkthrough couldn't run at all (app didn't start…). */
   walkthroughError?: string;
+  /** UI tickets verified by the repo's own Playwright tests instead of a walkthrough. */
+  spec?: SpecRunResult;
+  /** Backend changes: screenshots of the UI pages they map to (Settings → Verification). */
+  smoke?: StepOutcome[];
+  /** Pipeline test coverage (percent) on the MR and on its target branch, when GitLab reports it. */
+  coverage?: { head: number | null; base: number | null };
+}
+
+// ------------------------------------------------------------- spec + smoke
+
+interface PwSuite {
+  title?: string;
+  suites?: PwSuite[];
+  specs?: {
+    title: string;
+    tests?: {
+      status?: string;
+      results?: {
+        status?: string;
+        error?: { message?: string };
+        attachments?: { name?: string; contentType?: string; path?: string }[];
+      }[];
+    }[];
+  }[];
+}
+
+/**
+ * Read Playwright's JSON reporter output: per-test status (expected and flaky
+ * count as passed) and any PNG attachments (their absolute paths).
+ */
+export function parsePlaywrightReport(
+  json: unknown,
+): Omit<SpecRunResult, 'command' | 'screenshots'> & { attachments: string[] } {
+  const tests: SpecRunResult['tests'] = [];
+  const attachments: string[] = [];
+  const walk = (suite: PwSuite, prefix: string[]) => {
+    const titles = suite.title ? [...prefix, suite.title] : prefix;
+    for (const spec of suite.specs ?? []) {
+      for (const t of spec.tests ?? []) {
+        const last = t.results?.at(-1);
+        const status: 'passed' | 'failed' | 'skipped' =
+          t.status === 'skipped'
+            ? 'skipped'
+            : t.status === 'expected' || t.status === 'flaky'
+              ? 'passed'
+              : 'failed';
+        const error = last?.error?.message?.split('\n')[0];
+        tests.push({
+          title: [...titles, spec.title].join(' › '),
+          status,
+          ...(status === 'failed' && error ? { error: stripAnsi(error).slice(0, 300) } : {}),
+        });
+        for (const r of t.results ?? [])
+          for (const a of r.attachments ?? [])
+            if (a.path && a.contentType === 'image/png') attachments.push(a.path);
+      }
+    }
+    for (const child of suite.suites ?? []) walk(child, titles);
+  };
+  const root = (json ?? {}) as { suites?: PwSuite[] };
+  for (const s of root.suites ?? []) walk(s, []);
+  const count = (s: string) => tests.filter((t) => t.status === s).length;
+  return {
+    tests,
+    passed: count('passed'),
+    failed: count('failed'),
+    skipped: count('skipped'),
+    attachments,
+  };
+}
+
+/** "glob => /path" lines (Settings → Verification) → mapping rules; bad lines are skipped. */
+export function parseUiPageMap(text: string | undefined): { glob: string; path: string }[] {
+  return (text ?? '')
+    .split(/\r?\n/)
+    .map((line) => /^\s*(\S+)\s*=>\s*(\/\S*)\s*$/.exec(line))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => ({ glob: m[1]!, path: m[2]! }));
+}
+
+/** UI pages to smoke-check for a backend change (unique, in mapping order, at most 8). */
+export function uiPagesFor(changed: string[], map: { glob: string; path: string }[]): string[] {
+  const pages: string[] = [];
+  for (const rule of map) {
+    const re = globToRegExp(rule.glob);
+    if (changed.some((f) => re.test(f)) && !pages.includes(rule.path)) pages.push(rule.path);
+  }
+  return pages.slice(0, 8);
+}
+
+/** A goto + screenshot walkthrough over the given pages. */
+export function smokeWalkthrough(pages: string[]): Walkthrough {
+  return {
+    title: 'UI smoke check',
+    steps: pages.flatMap((p) => [
+      { action: 'goto' as const, path: p },
+      { action: 'screenshot' as const, caption: `Smoke check: ${p}` },
+    ]),
+  };
 }
 
 export function assessmentPrompt(issue: IssueDetail, evidence: Evidence): string {
@@ -174,16 +289,31 @@ export function assessmentPrompt(issue: IssueDetail, evidence: Evidence): string
         `${s.ok ? 'PASS' : 'FAIL'} ${s.step.action}${'caption' in s.step && s.step.caption ? ` (${s.step.caption})` : ''}${'text' in s.step && s.step.text ? ` "${s.step.text}"` : ''}${s.error ? `: ${s.error}` : ''}`,
     )
     .join('\n');
+  const spec = evidence.spec;
+  const smoke = evidence.smoke ?? [];
   return [
     `Assess whether Jira ticket ${issue.key} ("${issue.summary}") meets each acceptance criterion, using only the evidence below. Be strict: "verified" needs direct evidence, "partial" means some evidence, "not_verified" means none or failing.`,
     `Acceptance criteria:\n${issue.acceptanceCriteria.map((c) => `- ${c}`).join('\n') || `- ${issue.summary}`}`,
-    evidence.mode === 'ui'
-      ? `Browser walkthrough results:\n${steps || '(no steps ran)'}${evidence.walkthroughError ? `\nWalkthrough error: ${evidence.walkthroughError}` : ''}`
-      : 'No UI walkthrough (backend change).',
+    spec
+      ? `The repo's Playwright tests (${spec.command}): ${spec.passed} passed, ${spec.failed} failed, ${spec.skipped} skipped.${spec.error ? ` Error: ${spec.error}` : ''}\n${spec.tests
+          .slice(0, 40)
+          .map((t) => `${t.status.toUpperCase()} ${t.title}${t.error ? `: ${t.error}` : ''}`)
+          .join('\n')}`
+      : evidence.mode === 'ui'
+        ? `Browser walkthrough results:\n${steps || '(no steps ran)'}${evidence.walkthroughError ? `\nWalkthrough error: ${evidence.walkthroughError}` : ''}`
+        : 'No UI walkthrough (backend change).',
+    smoke.length
+      ? `UI smoke check of affected pages: ${smoke.filter((s) => s.step.action === 'goto' && s.ok).length} loaded${smoke.some((s) => !s.ok) ? `, failure: ${smoke.find((s) => !s.ok)!.error}` : ''}.`
+      : '',
     `Pipeline: ${evidence.pipelineStatus}${evidence.pipelineFailures.length ? `, failing jobs: ${evidence.pipelineFailures.map((f) => f.job).join(', ')}` : ''}.`,
+    evidence.coverage && evidence.coverage.head !== null
+      ? `Test coverage: ${evidence.coverage.head}%${evidence.coverage.base !== null ? ` (target branch ${evidence.coverage.base}%)` : ''}.`
+      : '',
     `Changed test files: ${evidence.changed.tests.join(', ') || 'none'}.`,
     `Reply with only this JSON: {"criteria":[{"text":"<criterion as given>","result":"verified"|"partial"|"not_verified","note":"one sentence of evidence"}],"summary":"one or two sentences"}`,
-  ].join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /** Without Claude: the best we can say from evidence alone, clearly labelled. */
@@ -192,8 +322,12 @@ export function heuristicAssessment(
   evidence: Evidence,
   why: string,
 ): Assessment {
+  const spec = evidence.spec;
   const uiOk =
-    evidence.mode === 'ui' && evidence.steps.length > 0 && evidence.steps.every((s) => s.ok);
+    evidence.mode === 'ui' &&
+    (spec
+      ? !spec.error && spec.failed === 0 && spec.passed > 0
+      : evidence.steps.length > 0 && evidence.steps.every((s) => s.ok));
   const pipelineOk = evidence.pipelineStatus === 'success';
   const result: CriterionResult =
     evidence.mode === 'ui'
@@ -218,7 +352,10 @@ export type VerificationOutcome = 'passed' | 'issues_found' | 'needs_coverage';
 export function deriveOutcome(evidence: Evidence, assessment: Assessment): VerificationOutcome {
   const failed =
     evidence.steps.some((s) => !s.ok) ||
+    (evidence.smoke ?? []).some((s) => !s.ok) ||
     !!evidence.walkthroughError ||
+    !!evidence.spec?.error ||
+    (evidence.spec?.failed ?? 0) > 0 ||
     evidence.pipelineStatus === 'failed';
   if (evidence.mode === 'backend' && evidence.changed.tests.length === 0 && !failed)
     return 'needs_coverage';
@@ -279,7 +416,24 @@ ${mr ? `<p><a href="${esc(mr.webUrl)}">!${mr.ref.iid} ${esc(mr.title)}</a> · +$
 <p>${evidence.changed.all.length} files changed${evidence.changed.ui.length ? `, ${evidence.changed.ui.length} UI` : ''}${evidence.changed.tests.length ? `, ${evidence.changed.tests.length} tests` : ''}.</p>
 ${input.diffExcerpts.map((d) => `<h3>${esc(d.path)}</h3><pre>${esc(d.diff)}</pre>`).join('')}`);
 
-  if (evidence.mode === 'ui') {
+  const caption = (s: StepOutcome) =>
+    ('caption' in s.step && s.step.caption) || `Step ${s.index + 1}`;
+  const spec = evidence.spec;
+  if (spec) {
+    slides.push(`<h1>Playwright tests</h1>
+<p><code>${esc(spec.command)}</code>: <strong>${spec.passed} passed</strong>${spec.failed ? `, <span class="bad">${spec.failed} failed</span>` : ''}${spec.skipped ? `, ${spec.skipped} skipped` : ''}</p>
+${spec.error ? `<p class="bad">${esc(spec.error)}</p>` : ''}
+<ul>${spec.tests
+      .slice(0, 60)
+      .map(
+        (t) =>
+          `<li class="${t.status === 'failed' ? 'bad' : t.status === 'skipped' ? 'muted' : 'verified'}">${esc(t.title)}${t.error ? ` — ${esc(t.error)}` : ''}</li>`,
+      )
+      .join('')}</ul>`);
+    for (const name of spec.screenshots.filter((n) => input.images[n])) {
+      slides.push(`<h2>${esc(name)}</h2><img src="${input.images[name]}" alt="${esc(name)}">`);
+    }
+  } else if (evidence.mode === 'ui') {
     const shots = evidence.steps.filter((s) => s.screenshot && input.images[s.screenshot]);
     const failed = evidence.steps.find((s) => !s.ok);
     slides.push(`<h1>Walkthrough</h1>
@@ -292,13 +446,44 @@ ${evidence.walkthroughError ? `<p class="bad">The walkthrough could not run: ${e
       .join('')}</ol>
 ${failed ? `<p class="bad">Stopped at step ${failed.index + 1}.</p>` : ''}`);
     for (const s of shots) {
-      slides.push(`<h2>${esc(('caption' in s.step && s.step.caption) || `Step ${s.index + 1}`)}</h2>
-<img src="${input.images[s.screenshot!]}" alt="${esc(('caption' in s.step && s.step.caption) || 'Screenshot')}">`);
+      const before = s.beforeScreenshot && input.images[s.beforeScreenshot];
+      slides.push(
+        before
+          ? `<h2>${esc(caption(s))}</h2>
+<div class="pair"><figure><figcaption class="muted">Before (target branch)</figcaption><img src="${before}" alt="Before: ${esc(caption(s))}"></figure>
+<figure><figcaption class="muted">After (this change)</figcaption><img src="${input.images[s.screenshot!]}" alt="After: ${esc(caption(s))}"></figure></div>`
+          : `<h2>${esc(caption(s))}</h2>
+<img src="${input.images[s.screenshot!]}" alt="${esc(caption(s))}">`,
+      );
     }
   }
 
+  const smoke = evidence.smoke ?? [];
+  if (smoke.length) {
+    const failed = smoke.find((s) => !s.ok);
+    slides.push(`<h1>UI smoke check</h1>
+<p class="muted">Pages that this backend change maps to (Settings → Verification).</p>
+${failed ? `<p class="bad">${esc(failed.error ?? 'A page failed to load.')}</p>` : ''}`);
+    for (const s of smoke.filter((x) => x.screenshot && input.images[x.screenshot])) {
+      slides.push(
+        `<h2>${esc(caption(s))}</h2><img src="${input.images[s.screenshot!]}" alt="${esc(caption(s))}">`,
+      );
+    }
+  }
+
+  const cov = evidence.coverage;
+  const coverageLine =
+    cov && cov.head !== null
+      ? `<p>Coverage: <strong>${cov.head.toFixed(1)}%</strong>${
+          cov.base !== null
+            ? ` (target branch ${cov.base.toFixed(1)}%, <span class="${cov.head + 0.05 < cov.base ? 'bad' : 'verified'}">${cov.head - cov.base >= 0 ? '+' : ''}${(cov.head - cov.base).toFixed(1)}</span>)`
+            : ''
+        }</p>`
+      : '';
+
   slides.push(`<h1>Test evidence</h1>
 <p>Pipeline: <strong>${esc(evidence.pipelineStatus)}</strong></p>
+${coverageLine}
 ${evidence.pipelineFailures.map((f) => `<h3>Failing job: ${esc(f.job)} (${esc(f.stage)})</h3><pre>${esc(f.logTail.split('\n').slice(-25).join('\n'))}</pre>`).join('')}
 <h2>Changed tests</h2>
 ${evidence.changed.tests.length ? `<ul>${evidence.changed.tests.map((t) => `<li><code>${esc(t)}</code></li>`).join('')}</ul>` : '<p class="bad">No test files changed.</p>'}`);
@@ -319,6 +504,7 @@ ${assessment.criteria.map((c) => `<tr><td>${esc(c.text)}</td><td class="${c.resu
 section{display:none;min-height:100vh;padding:48px max(24px,8vw)}section.on{display:block}
 h1{font-size:28px;margin:0 0 12px}h2{font-size:20px}pre{background:rgba(127,127,127,.12);padding:12px;overflow:auto;font-size:12px;white-space:pre-wrap}
 img{max-width:100%;max-height:72vh;border:1px solid var(--line);border-radius:6px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:16px}.pair figure{margin:0}.pair img{max-height:60vh}
 .muted{color:var(--muted)}.bad{color:var(--bad)}.verified{color:var(--ok)}.partial{color:var(--warn)}.not_verified{color:var(--bad)}
 table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}
 nav{position:fixed;bottom:12px;right:16px;display:flex;gap:8px;align-items:center;font-size:13px}

@@ -25,7 +25,10 @@ import {
   hasPendingJob,
   listProfiles,
   setActiveProfile,
+  setTheme,
+  THEMES,
   updateProfile,
+  type Theme,
 } from '@tab-enter/db';
 import { PatCredentialProvider, SECRET_NAMES } from '@tab-enter/secrets';
 import { revalidatePath } from 'next/cache';
@@ -51,6 +54,12 @@ async function requireProfile(profileId: string) {
 export async function switchProfile(profileId: string): Promise<void> {
   await requireProfile(profileId);
   await setActiveProfile(await getDb(), profileId);
+  revalidatePath('/', 'layout');
+}
+
+export async function changeTheme(theme: string): Promise<void> {
+  if (!THEMES.includes(theme as Theme)) throw new Error('Unknown theme.');
+  await setTheme(await getDb(), theme as Theme);
   revalidatePath('/', 'layout');
 }
 
@@ -121,6 +130,11 @@ const ConnectionsSchema = z.object({
     .trim()
     .refine((v) => v === '' || /^\d+$/.test(v), 'The board id is a number (from the board URL).'),
   jiraDoneStatuses: z.string(),
+  jiraTokenExpiresAt: z
+    .string()
+    .trim()
+    .refine((v) => v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v), 'Enter the expiry as a date.')
+    .default(''),
   gitlabBaseUrl: httpUrl,
   gitlabToken: z.string(),
   gitlabProjects: z.string(),
@@ -157,6 +171,7 @@ export async function saveConnectionsAction(
       email: input.jiraEmail,
       boardId: input.jiraBoardId || undefined,
       doneStatuses: csv(input.jiraDoneStatuses),
+      tokenExpiresAt: input.jiraTokenExpiresAt || undefined,
     },
     gitlab: {
       ...profile.settings.gitlab,
@@ -235,18 +250,26 @@ export async function testConnectionsAction(profileId: string): Promise<Connecti
   );
   const opts = { profileId, settings: profile.settings, credentials };
 
-  const describe = async (who: () => Promise<{ displayName: string; username?: string }>) => {
+  const describe = async (
+    who: () => Promise<{ displayName: string; username?: string }>,
+    expiry?: () => Promise<string | null>,
+  ) => {
     try {
       const user = await who();
       const name = user.username ? `${user.displayName} (${user.username})` : user.displayName;
-      return { ok: `Connected as ${name}.` };
+      const expires = await expiry?.().catch(() => null);
+      return { ok: `Connected as ${name}.${expires ? ` The token expires ${expires}.` : ''}` };
     } catch (err) {
       return { error: redactSecrets(err instanceof Error ? err.message : String(err)) };
     }
   };
+  const gitlabHost = createGitLabHost(opts);
   const [jira, gitlab] = await Promise.all([
     describe(() => createJiraTracker(opts).getCurrentUser()),
-    describe(() => createGitLabHost(opts).getCurrentUser()),
+    describe(
+      () => gitlabHost.getCurrentUser(),
+      async () => (await gitlabHost.getTokenExpiry?.()) ?? null,
+    ),
   ]);
   return { jira, gitlab };
 }

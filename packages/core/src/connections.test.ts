@@ -77,6 +77,33 @@ describe('deriveConnections', () => {
     expect(byId(inputs()).claude).toMatchObject({ state: 'ok', detail: 'v2.1.3, logged in' });
   });
 
+  it('warns before a known token expiry and errors once it has passed', () => {
+    const now = new Date('2026-11-03T12:00:00Z');
+    const synced = { lastSyncedAt: now, lastError: null };
+    const base = inputs({
+      now,
+      syncStates: [
+        { source: 'jira', ...synced },
+        { source: 'gitlab', ...synced, tokenExpiresAt: '2026-11-10' },
+      ],
+    });
+    const jiraExpiring = {
+      ...base.settings,
+      jira: { ...base.settings.jira, tokenExpiresAt: '2026-11-01' },
+    };
+    const c = byId({ ...base, settings: jiraExpiring });
+    expect(c.gitlab).toMatchObject({
+      state: 'warning',
+      detail: expect.stringContaining('in 7 days'),
+    });
+    expect(c.jira).toMatchObject({ state: 'error', detail: expect.stringContaining('expired') });
+    // Far-off expiry stays green.
+    const later = byId(
+      inputs({ now, syncStates: [{ source: 'gitlab', ...synced, tokenExpiresAt: '2027-06-01' }] }),
+    );
+    expect(later.gitlab!.state).toBe('ok');
+  });
+
   it('always shows Slack as not connected', () => {
     expect(byId(inputs()).slack!.state).toBe('off');
   });

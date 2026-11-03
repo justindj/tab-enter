@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { findOnPath, runCommand } from '@tab-enter/claude';
 import {
@@ -15,10 +15,16 @@ import {
   deriveOutcome,
   heuristicAssessment,
   isExcluded,
+  parsePlaywrightReport,
+  parseUiPageMap,
   parseWith,
+  redactSecrets,
+  smokeWalkthrough,
+  uiPagesFor,
   verificationSummary,
   WalkthroughSchema,
   walkthroughPrompt,
+  type SpecRunResult,
   type AgentRunner,
   type Assessment,
   type BlobStore,
@@ -48,7 +54,13 @@ import {
   type RunRow,
 } from '@tab-enter/db';
 import type { SecretStore } from '@tab-enter/secrets';
-import { runWalkthrough, startApp, type WalkthroughOptions } from '../walkthrough';
+import {
+  runShell,
+  runWalkthrough,
+  startApp,
+  waitUntilDown,
+  type WalkthroughOptions,
+} from '../walkthrough';
 import { ensureDetachedWorktree, ensureWorktree } from '../worktree';
 import { executeRun } from './agent-run';
 
@@ -66,7 +78,12 @@ export interface VerifyDeps {
   /** Tests: fake Claude, fake browser, no real app start. */
   runner?: (run: RunRow, vars: Record<string, string>) => AgentRunner;
   launch?: WalkthroughOptions['launch'];
-  startApp?: typeof startApp;
+  startApp?: (
+    command: string,
+    cwd: string,
+    baseUrl: string,
+  ) => Promise<{ stop: () => Promise<void> | void }>;
+  runShell?: typeof runShell;
 }
 
 export interface VerifyJob {
@@ -147,8 +164,33 @@ async function verify(
   let runId: string | null = null;
   const images: Record<string, string> = {};
 
-  // 2. UI: walkthrough script (saved, demo, or written by Claude), then run it.
-  if (mode === 'ui') {
+  if (mr) {
+    evidence.coverage = await mrCoverage(profile, mr, deps).catch(() => undefined);
+  }
+
+  // 2a. UI with the repo's own Playwright tests: run them instead of a walkthrough.
+  if (mode === 'ui' && !profile.isDemo && verification.specCommand) {
+    evidence.spec = await runSpec(
+      profile,
+      project,
+      mr,
+      verification.specCommand,
+      outDir,
+      notes,
+      deps,
+    ).catch((err: unknown): SpecRunResult => ({
+      command: verification.specCommand!,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      tests: [],
+      screenshots: [],
+      error: err instanceof Error ? err.message : String(err),
+    }));
+    await loadImages(outDir, evidence.spec.screenshots, images);
+  }
+  // 2b. UI: walkthrough script (saved, demo, or written by Claude), then run it.
+  else if (mode === 'ui') {
     let script: Walkthrough | null;
     if (job.rerun) {
       script = await savedScript(db, deps.blobs, profile.id, issueKey, artifactId);
@@ -221,11 +263,64 @@ async function verify(
           return [];
         },
       );
-      for (const s of evidence.steps) {
-        if (!s.screenshot) continue;
-        const png = await readFile(path.join(outDir, s.screenshot)).catch(() => null);
-        if (png) images[s.screenshot] = `data:image/png;base64,${png.toString('base64')}`;
+      // "Before": the same steps on the target branch, for open MRs whose app tab-enter starts.
+      if (
+        settings.verification.captureBefore &&
+        verification.startCommand &&
+        mr?.state === 'opened' &&
+        evidence.steps.some((s) => s.ok && s.screenshot)
+      ) {
+        const before = await walk(
+          profile,
+          project,
+          mr,
+          script,
+          path.join(outDir, 'before'),
+          notes,
+          deps,
+          'before',
+        ).catch((err: unknown) => {
+          notes.push(`No "before" screenshots: ${err instanceof Error ? err.message : err}`);
+          return [];
+        });
+        for (const b of before) {
+          const after = evidence.steps.find((s) => s.index === b.index);
+          if (b.ok && b.screenshot && after?.screenshot)
+            after.beforeScreenshot = `before/${b.screenshot}`;
+        }
       }
+      await loadImages(
+        outDir,
+        evidence.steps.flatMap((s) => [s.screenshot, s.beforeScreenshot]),
+        images,
+      );
+    }
+  }
+
+  // 2c. Backend change: smoke-check the UI pages it maps to (Settings → Verification).
+  if (mode === 'backend' && !profile.isDemo && verification.baseUrl) {
+    const pages = uiPagesFor(changed.all, parseUiPageMap(verification.uiPages));
+    if (pages.length > 0) {
+      const smoke = await walk(
+        profile,
+        project,
+        mr,
+        smokeWalkthrough(pages),
+        path.join(outDir, 'smoke'),
+        notes,
+        deps,
+      ).catch((err: unknown) => {
+        notes.push(`UI smoke check couldn't run: ${err instanceof Error ? err.message : err}`);
+        return [];
+      });
+      evidence.smoke = smoke.map((s) =>
+        s.screenshot ? { ...s, screenshot: `smoke/${s.screenshot}` } : s,
+      );
+      await loadImages(
+        outDir,
+        evidence.smoke.map((s) => s.screenshot),
+        images,
+      );
     }
   }
 
@@ -396,6 +491,57 @@ async function appWorktree(
   return wt.cwd;
 }
 
+async function testCredentials(
+  profile: Profile,
+  project: WatchedProject | undefined,
+  deps: VerifyDeps,
+): Promise<{ username: string; password: string } | null> {
+  const name = project?.verification.testCredentialsSecret;
+  if (!name || !deps.secrets) return null;
+  const raw = await deps.secrets.get(profile.id, name);
+  return raw ? (JSON.parse(raw) as { username: string; password: string }) : null;
+}
+
+/**
+ * Run `fn` with the app up: started from the change's worktree (or, for
+ * "before", the target branch's) when a start command is set, and stopped
+ * (port released) afterwards.
+ */
+async function withApp<T>(
+  project: WatchedProject | undefined,
+  mr: MergeRequest | undefined,
+  which: 'change' | 'before',
+  notes: string[],
+  deps: VerifyDeps,
+  fn: (cwd: string | null) => Promise<T>,
+  needsCode = false,
+): Promise<T> {
+  const v = project?.verification ?? {};
+  if (!v.baseUrl)
+    throw new VerifyError('No test URL is set for this project (Settings → Verification).');
+  if (which === 'before' && !v.startCommand)
+    throw new VerifyError('"Before" screenshots need a start command.');
+  // With no start command the app is already running, so walkthroughs need no checkout.
+  const cwd =
+    which === 'before'
+      ? await beforeWorktree(project, mr, notes)
+      : v.startCommand || needsCode
+        ? await appWorktree(project, mr, notes)
+        : null;
+  let app: { stop: () => Promise<void> | void } | null = null;
+  if (v.startCommand) {
+    app = await (deps.startApp ?? startApp)(v.startCommand, cwd!, v.baseUrl);
+  }
+  try {
+    return await fn(cwd);
+  } finally {
+    if (app) {
+      await app.stop();
+      await waitUntilDown(v.baseUrl);
+    }
+  }
+}
+
 async function walk(
   profile: Profile,
   project: WatchedProject | undefined,
@@ -404,30 +550,132 @@ async function walk(
   outDir: string,
   notes: string[],
   deps: VerifyDeps,
+  which: 'change' | 'before' = 'change',
 ): Promise<StepOutcome[]> {
-  const v = project?.verification ?? {};
-  if (!v.baseUrl)
-    throw new VerifyError('No test URL is set for this project (Settings → Verification).');
-  let credentials: { username: string; password: string } | null = null;
-  if (v.testCredentialsSecret && deps.secrets) {
-    const raw = await deps.secrets.get(profile.id, v.testCredentialsSecret);
-    if (raw) credentials = JSON.parse(raw) as { username: string; password: string };
-  }
-  let app: { stop: () => void } | null = null;
-  if (v.startCommand) {
-    const cwd = await appWorktree(project, mr, notes);
-    app = await (deps.startApp ?? startApp)(v.startCommand, cwd, v.baseUrl);
-  }
-  try {
-    return await runWalkthrough(script, {
-      baseUrl: v.baseUrl,
+  const credentials = await testCredentials(profile, project, deps);
+  return withApp(project, mr, which, notes, deps, () =>
+    runWalkthrough(script, {
+      baseUrl: project!.verification.baseUrl!,
       credentials,
       outDir,
-      video: profile.settings.verification.captureVideo,
+      video: which === 'change' && profile.settings.verification.captureVideo,
+      // On the target branch the new behaviour's checks are expected to fail; don't wait long.
+      ...(which === 'before' ? { stepTimeoutMs: 4000 } : {}),
       launch: deps.launch,
-    });
-  } finally {
-    app?.stop();
+    }),
+  );
+}
+
+/** The target branch, for "before" screenshots of an open MR. */
+async function beforeWorktree(
+  project: WatchedProject | undefined,
+  mr: MergeRequest | undefined,
+  notes: string[],
+): Promise<string> {
+  if (!mr || !project?.localPath) {
+    throw new VerifyError('no watched project with a local clone path for this MR');
+  }
+  const git = await findOnPath('git');
+  if (!git) throw new VerifyError('git is not on PATH');
+  const wt = await ensureDetachedWorktree(runCommand, git, {
+    clonePath: project.localPath,
+    key: `verify-${mr.targetBranch}`,
+    remoteBranch: mr.targetBranch,
+  });
+  notes.push(...wt.warnings);
+  return wt.cwd;
+}
+
+const MAX_SPEC_SCREENSHOTS = 12;
+
+/**
+ * Run the repo's own Playwright tests in the change's worktree with the JSON
+ * reporter. BASE_URL (and TEST_USERNAME / TEST_PASSWORD when configured) are
+ * passed as environment variables, never written anywhere.
+ */
+async function runSpec(
+  profile: Profile,
+  project: WatchedProject | undefined,
+  mr: MergeRequest | undefined,
+  command: string,
+  outDir: string,
+  notes: string[],
+  deps: VerifyDeps,
+): Promise<SpecRunResult> {
+  const v = project?.verification ?? {};
+  const credentials = await testCredentials(profile, project, deps);
+  const reportFile = path.join(outDir, 'playwright-report.json');
+  return withApp(project, mr, 'change', notes, deps, async (cwd) => runAndRead(cwd!), true);
+
+  async function runAndRead(cwd: string): Promise<SpecRunResult> {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      BASE_URL: v.baseUrl,
+      PLAYWRIGHT_JSON_OUTPUT_NAME: reportFile,
+      ...(credentials
+        ? { TEST_USERNAME: credentials.username, TEST_PASSWORD: credentials.password }
+        : {}),
+    };
+    const run = await (deps.runShell ?? runShell)(`${command} --reporter=json`, cwd, { env });
+    const raw = await readFile(reportFile, 'utf8').catch(() => null);
+    if (!raw) {
+      let output = redactSecrets(run.output.slice(-800));
+      if (credentials?.password) output = output.replaceAll(credentials.password, '••••');
+      throw new VerifyError(
+        `${run.timedOut ? 'The tests timed out' : `The tests exited (code ${run.code})`} without a report. Output: ${output}`,
+      );
+    }
+    const report = parsePlaywrightReport(JSON.parse(raw));
+    const screenshots: string[] = [];
+    for (const [i, file] of report.attachments.slice(0, MAX_SPEC_SCREENSHOTS).entries()) {
+      const name = `spec-${String(i + 1).padStart(2, '0')}.png`;
+      if (
+        await copyFile(file, path.join(outDir, name)).then(
+          () => true,
+          () => false,
+        )
+      )
+        screenshots.push(name);
+    }
+    return {
+      command,
+      passed: report.passed,
+      failed: report.failed,
+      skipped: report.skipped,
+      tests: report.tests,
+      screenshots,
+      ...(run.timedOut ? { error: 'The tests timed out after 10 minutes.' } : {}),
+    };
+  }
+}
+
+async function mrCoverage(profile: Profile, mr: MergeRequest, deps: VerifyDeps) {
+  if (profile.isDemo) {
+    const fixture = JSON.parse(
+      await readFile(path.join(deps.fixturesDir, 'demo/gitlab.json'), 'utf8'),
+    ) as DemoGitLabFixture;
+    return new DemoCodeHost(fixture).getCoverage(mr.ref);
+  }
+  if (!deps.credentials) return undefined;
+  const host = createGitLabHost({
+    profileId: profile.id,
+    settings: profile.settings,
+    credentials: deps.credentials,
+    fetch: deps.fetch,
+  });
+  return host.getCoverage?.(mr.ref);
+}
+
+/** Screenshots in the run folder → data URIs for the self-contained slideshow. */
+async function loadImages(
+  outDir: string,
+  names: (string | undefined)[],
+  images: Record<string, string>,
+) {
+  for (const name of names) {
+    if (!name || images[name]) continue;
+    const png = await readFile(path.join(outDir, name)).catch(() => null);
+    if (png) images[name] = `data:image/png;base64,${png.toString('base64')}`;
   }
 }
 

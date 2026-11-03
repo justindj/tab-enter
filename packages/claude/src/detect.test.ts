@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { compareVersions, detectClaude, detectRtk, parseAuthStatus, parseVersion } from './detect';
+import {
+  compareVersions,
+  detectClaude,
+  detectRtk,
+  parseAuthStatus,
+  parseRtkGain,
+  parseVersion,
+} from './detect';
 import type { CommandResult, RunCommand } from './exec';
 
 const ok = (stdout: string, code = 0): CommandResult => ({
@@ -96,9 +103,39 @@ describe('detectRtk', () => {
     });
   });
 
-  it('warns about a different tool named rtk', async () => {
+  it('warns about a different tool named rtk, and never asks it for savings', async () => {
     const run = fakeRun({ '--version': ok('1.2.3') });
     const status = await detectRtk({ find: async () => '/bin/rtk', run, now });
     expect(status.detail).toMatch(/may not be/);
+    expect(status.savings).toBeNull();
+    expect(run.calls).toEqual(['--version']);
+  });
+
+  it('reads savings from `rtk gain --all --format json`', async () => {
+    const run = fakeRun({
+      '--version': ok('rtk 0.9.2'),
+      'gain --all --format json': ok(
+        JSON.stringify({
+          summary: {
+            total_commands: 300,
+            total_input: 1500000,
+            total_output: 300000,
+            total_saved: 1200000,
+            avg_savings_pct: 80.0,
+          },
+          daily: [],
+        }),
+      ),
+    });
+    const status = await detectRtk({ find: async () => '/bin/rtk', run, now });
+    expect(status.savings).toEqual({
+      commands: 300,
+      inputTokens: 1500000,
+      savedTokens: 1200000,
+      avgPct: 80,
+    });
+    // An older rtk without JSON output just shows no savings.
+    expect(parseRtkGain(ok('Total saved: 1.2M', 0))).toBeNull();
+    expect(parseRtkGain(ok('', 2))).toBeNull();
   });
 });

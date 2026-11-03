@@ -24,3 +24,5 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      # Demo mode end to end, in the runner's preinstalled Google Chrome.
+      - run: pnpm test:e2e

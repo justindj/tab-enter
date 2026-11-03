@@ -11,6 +11,7 @@ import {
   enqueueJob,
   finishJob,
   getDataDir,
+  getProfile,
   getSyncStates,
   hasPendingJob,
   listProfiles,
@@ -18,6 +19,7 @@ import {
   type Db,
 } from '@tab-enter/db';
 import { executeRun, type AgentRunDeps } from './handlers/agent-run';
+import { cleanupWorktrees, removeWorktree } from './handlers/cleanup-worktrees';
 import { deleteProfileFiles } from './handlers/delete-profile-files';
 import { detectTools } from './handlers/detect-tools';
 import { openTerminal, type OpenTerminalDeps } from './handlers/open-terminal';
@@ -56,11 +58,22 @@ async function dispatch(db: Db, job: Job, deps: WorkerDeps): Promise<unknown> {
     case 'detect-tools':
       return detectTools(db);
     case 'sync':
-      return syncProfile(db, job.profileId, {
+      await syncProfile(db, job.profileId, {
         fixturesDir: deps.fixturesDir,
         credentials: deps.credentials,
         fetch: deps.fetch,
       });
+      // Fresh MR states may mean worktrees to clean up.
+      if (
+        (await getProfile(db, job.profileId))?.settings.gitlab.projects.some((p) => p.localPath) &&
+        !(await hasPendingJob(db, 'cleanup-worktrees', job.profileId))
+      )
+        await enqueueJob(db, { type: 'cleanup-worktrees', profileId: job.profileId });
+      return;
+    case 'cleanup-worktrees':
+      return cleanupWorktrees(db, job.profileId, deps.run);
+    case 'remove-worktree':
+      return removeWorktree(db, job, deps.run);
     case 'delete-profile-files':
       return deleteProfileFiles(job.profileId);
     case 'agent-run':

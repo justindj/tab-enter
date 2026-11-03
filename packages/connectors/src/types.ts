@@ -20,6 +20,10 @@ export interface CodeHost {
   /** MRs where I'm a reviewer. */
   listReviewRequests(opts: { includeCompleted: boolean }): Promise<MergeRequest[]>;
   getMRDetail(ref: MRRef): Promise<MRDetail>;
+  /** Pipeline test coverage (percent) of the MR head and its target branch; null when unknown. */
+  getCoverage?(ref: MRRef): Promise<{ head: number | null; base: number | null }>;
+  /** When the access token expires (ISO date), null if it doesn't or the host can't say. */
+  getTokenExpiry?(): Promise<string | null>;
 }
 
 // Write operations, used only by confirmed, logged write actions (M7).

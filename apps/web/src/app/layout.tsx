@@ -5,6 +5,7 @@ import { ProfileSwitcher, RefreshButton } from '@/components/shell/header-contro
 import { KeyboardShortcuts } from '@/components/shell/keyboard-shortcuts';
 import { Sidebar } from '@/components/shell/sidebar';
 import { SyncPoller } from '@/components/shell/sync-poller';
+import { ThemePicker } from '@/components/shell/theme-picker';
 import { Badge } from '@/components/ui/badge';
 import { loadApp } from '@/lib/data';
 import { timeAgo } from '@/lib/format';
@@ -29,17 +30,17 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   };
 
   return (
-    <html lang="en">
+    <html lang="en" data-theme={app.theme}>
       <body>
         <div className="flex h-screen">
           <Sidebar counts={counts} />
           <div className="flex min-w-0 flex-1 flex-col">
-            <header className="flex items-center justify-between gap-4 border-b px-6 py-2.5">
+            <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-6 py-2.5">
               <div className="flex items-center gap-3">
                 <ProfileSwitcher profiles={app.profiles} activeId={active.id} />
                 {active.isDemo && <Badge tone="info">Demo mode: invented data</Badge>}
               </div>
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <div className="ml-auto flex flex-wrap items-center justify-end gap-3 text-xs text-muted-foreground">
                 <ConnectionStatus connections={app.connections} />
                 <span className="h-4 border-l" aria-hidden />
                 {app.sync.error ? (
@@ -52,6 +53,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
                   </span>
                 )}
                 <RefreshButton syncing={app.sync.syncing} />
+                <ThemePicker theme={app.theme} />
               </div>
             </header>
             <main className="flex-1 overflow-auto px-6 py-5">{children}</main>

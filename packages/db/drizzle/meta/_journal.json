@@ -29,6 +29,13 @@
       "when": 1793679191132,
       "tag": "0003_write_actions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793714169869,
+      "tag": "0004_worktrees",
+      "breakpoints": true
     }
   ]
 }

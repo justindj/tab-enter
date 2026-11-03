@@ -23,6 +23,10 @@ export const JobSchema = z.discriminatedUnion('type', [
     /** Re-run the saved walkthrough instead of asking Claude for a new one. */
     rerun: z.boolean(),
   }),
+  /** Remove tab-enter worktrees whose MR merged or closed; ask about ones with local work. */
+  z.object({ type: z.literal('cleanup-worktrees'), profileId: z.string() }),
+  /** The user confirmed removing a worktree that has local work (worktrees row). */
+  z.object({ type: z.literal('remove-worktree'), profileId: z.string(), worktreeId: z.string() }),
   /**
    * Open Claude Code interactively in the user's terminal: resuming a run's
    * session, or fresh in the worktree for a ticket/MR.

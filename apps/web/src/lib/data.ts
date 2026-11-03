@@ -5,6 +5,7 @@ import {
   getActiveProfile,
   getDb,
   getSyncStates,
+  getTheme,
   getToolStatuses,
   hasPendingJob,
   listIssues,
@@ -38,15 +39,17 @@ export const loadApp = cache(async () => {
   const [profiles, active] = await Promise.all([listProfiles(db), getActiveProfile(db)]);
   if (!active) throw new Error('No profile found.');
 
-  const [issues, mergeRequests, links, manual, syncStates, syncing, tools] = await Promise.all([
-    listIssues(db, active.id),
-    listMergeRequests(db, active.id),
-    listLinks(db, active.id),
-    listManualLinks(db, active.id),
-    getSyncStates(db, active.id),
-    hasPendingJob(db, 'sync', active.id),
-    getToolStatuses(db),
-  ]);
+  const [issues, mergeRequests, links, manual, syncStates, syncing, tools, theme] =
+    await Promise.all([
+      listIssues(db, active.id),
+      listMergeRequests(db, active.id),
+      listLinks(db, active.id),
+      listManualLinks(db, active.id),
+      getSyncStates(db, active.id),
+      hasPendingJob(db, 'sync', active.id),
+      getToolStatuses(db),
+      getTheme(db),
+    ]);
   const now = new Date();
   const workspace = buildWorkspace({
     issues,
@@ -81,6 +84,7 @@ export const loadApp = cache(async () => {
     workspace,
     sync: { lastSyncedAt, error: syncError, syncing },
     tools,
+    theme,
     /** Why Run in Claude Code is unavailable, or null when it can run. */
     runBlocker,
     connections: deriveConnections({
@@ -89,6 +93,7 @@ export const loadApp = cache(async () => {
       secretNames: active.secretNames,
       syncStates,
       claude: tools.claude,
+      now,
     }),
     now,
   };

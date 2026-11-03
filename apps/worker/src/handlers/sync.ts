@@ -205,10 +205,17 @@ export async function syncProfile(db: Db, profileId: string, deps: SyncDeps): Pr
     'jira',
     issuesResult.status === 'fulfilled' ? {} : { error: errorMessage(issuesResult.reason) },
   );
+  // Token expiry (for the header warning); best effort, demo hosts can't say.
+  const tokenExpiresAt =
+    mrsResult.status === 'fulfilled' && !profile.isDemo
+      ? await (connectors.host().getTokenExpiry?.() ?? Promise.resolve(null)).catch(() => null)
+      : undefined;
   await recordSync(
     db,
     profileId,
     'gitlab',
-    mrsResult.status === 'fulfilled' ? {} : { error: errorMessage(mrsResult.reason) },
+    mrsResult.status === 'fulfilled'
+      ? { tokenExpiresAt }
+      : { error: errorMessage(mrsResult.reason) },
   );
 }

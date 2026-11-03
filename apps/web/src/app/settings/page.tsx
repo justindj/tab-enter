@@ -1,6 +1,7 @@
 import { formatWatchedProjects, type ToolStatus } from '@tab-enter/core';
 import {
   getDb,
+  listWorktrees,
   listWriteActions,
   usageSummary,
   type UsageRow,
@@ -11,6 +12,7 @@ import type { ReactNode } from 'react';
 import { requestToolDetection } from '@/app/actions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ThemePicker } from '@/components/shell/theme-picker';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { loadApp } from '@/lib/data';
 import { formatTokens, formatUsd, plural, timeAgo } from '@/lib/format';
@@ -24,6 +26,7 @@ import {
   VerificationSettingsForm,
   WriteActionsForm,
 } from './forms';
+import { WorktreeButtons } from './worktree-buttons';
 
 function ToolRow({
   name,
@@ -74,15 +77,40 @@ function ToolRow({
   );
 }
 
+function RtkSavings({ rtk }: { rtk: ToolStatus | undefined }) {
+  const s = rtk?.savings;
+  if (!rtk?.installed) return null;
+  return (
+    <p className="text-xs text-muted-foreground">
+      {s && s.commands > 0 ? (
+        <>
+          RTK has saved about <strong>{formatTokens(s.savedTokens)}</strong> ({Math.round(s.avgPct)}
+          % of command output) across {plural(s.commands, 'command')}, by its own estimate (
+          <code>rtk gain</code>, all projects).
+        </>
+      ) : (
+        <>RTK is installed but has no savings recorded yet.</>
+      )}
+    </p>
+  );
+}
+
 function UsagePanel({
   usage,
   presets,
+  rtk,
 }: {
   usage: UsageSummary;
   presets: Record<string, { label: string }>;
+  rtk: ToolStatus | undefined;
 }) {
   if (usage.total.runs === 0) {
-    return <EmptyState title="No runs in the last 7 days" />;
+    return (
+      <CardBody className="grid gap-3">
+        <EmptyState title="No runs in the last 7 days" />
+        <RtkSavings rtk={rtk} />
+      </CardBody>
+    );
   }
   const table = (title: string, rows: UsageRow[], label: (k: string) => string) => (
     <div>
@@ -118,25 +146,37 @@ function UsagePanel({
         {table('Per preset', usage.byPreset, (k) => presets[k]?.label ?? k)}
         {table('Per ticket', usage.byTicket, (k) => k)}
       </div>
-      <p className="text-xs text-muted-foreground">
-        RTK savings (`rtk gain`) will show here once RTK reporting is wired up.
-      </p>
+      <RtkSavings rtk={rtk} />
     </CardBody>
   );
 }
 
 export default async function SettingsPage() {
-  const { profiles, active, tools, now } = await loadApp();
+  const { profiles, active, tools, now, theme } = await loadApp();
   const s = active.settings;
   const db = await getDb();
-  const [usage, writes] = await Promise.all([
+  const [usage, writes, worktreeRows] = await Promise.all([
     usageSummary(db, active.id, new Date(now.getTime() - 7 * 86_400_000), now),
     listWriteActions(db, active.id, 50),
+    listWorktrees(db, active.id),
   ]);
+  // Decisions first, then the most recent cleanups.
+  const trees = [
+    ...worktreeRows.filter((w) => w.status === 'needs_confirmation'),
+    ...worktreeRows.filter((w) => w.status !== 'needs_confirmation').slice(0, 8),
+  ];
 
   return (
     <div className="mx-auto grid max-w-4xl gap-5">
       <h1 className="text-lg font-semibold">Settings</h1>
+
+      <Card>
+        <CardHeader
+          title="Appearance"
+          description="Applies to every profile. System follows your operating system's setting."
+          actions={<ThemePicker theme={theme} showLabels />}
+        />
+      </Card>
 
       <Card>
         <CardHeader
@@ -220,6 +260,7 @@ export default async function SettingsPage() {
                 email: s.jira.email,
                 boardId: s.jira.boardId ?? '',
                 doneStatuses: s.jira.doneStatuses.join(', '),
+                tokenExpiresAt: s.jira.tokenExpiresAt ?? '',
               }}
               gitlab={{
                 baseUrl: s.gitlab.baseUrl,
@@ -256,7 +297,7 @@ export default async function SettingsPage() {
           title="Usage"
           description="Tokens and cost as Claude Code reported them, last 7 days, this profile."
         />
-        <UsagePanel usage={usage} presets={s.claude.presets} />
+        <UsagePanel usage={usage} presets={s.claude.presets} rtk={tools.rtk} />
       </Card>
 
       <Card>
@@ -279,10 +320,13 @@ export default async function SettingsPage() {
                 key={active.id}
                 profileId={active.id}
                 captureVideo={s.verification.captureVideo}
+                captureBefore={s.verification.captureBefore}
                 projects={s.gitlab.projects.map((p) => ({
                   label: p.path || p.id,
                   baseUrl: p.verification.baseUrl ?? '',
                   startCommand: p.verification.startCommand ?? '',
+                  specCommand: p.verification.specCommand ?? '',
+                  uiPages: p.verification.uiPages ?? '',
                   hasCredentials: !!p.verification.testCredentialsSecret,
                   hasClone: !!p.localPath,
                 }))}
@@ -333,6 +377,66 @@ export default async function SettingsPage() {
           />
         </CardBody>
       </Card>
+
+      {!active.isDemo && (
+        <Card id="worktrees">
+          <CardHeader
+            title="Worktrees"
+            description="When a branch’s MR merges or closes, tab-enter removes its worktree. Ones with uncommitted or unpushed work wait for you here."
+          />
+          {trees.length === 0 ? (
+            <EmptyState title="Nothing cleaned up or waiting" />
+          ) : (
+            <ul className="divide-y">
+              {trees.map((w) => (
+                <li key={w.id} className="grid gap-1.5 px-4 py-2.5 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge
+                      tone={
+                        w.status === 'removed'
+                          ? 'success'
+                          : w.status === 'kept'
+                            ? 'muted'
+                            : 'warning'
+                      }
+                    >
+                      {w.status === 'removed'
+                        ? 'Removed'
+                        : w.status === 'kept'
+                          ? 'Kept'
+                          : 'Needs your decision'}
+                    </Badge>
+                    <span className="font-medium">{w.branch}</span>
+                    <span className="text-xs text-muted-foreground">
+                      MR {w.mrKey} {w.reason} · {timeAgo(w.updatedAt, now)}
+                    </span>
+                  </div>
+                  <code className="text-xs break-all text-muted-foreground">{w.path}</code>
+                  {w.status === 'needs_confirmation' && (
+                    <>
+                      <p className="text-xs">
+                        {[
+                          w.uncommitted > 0 && plural(w.uncommitted, 'uncommitted file'),
+                          w.unpushed.length > 0 && plural(w.unpushed.length, 'unpushed commit'),
+                        ]
+                          .filter(Boolean)
+                          .join(', ') || 'git refused to remove it'}
+                        {w.error && <span className="text-danger"> · {w.error}</span>}
+                      </p>
+                      <WorktreeButtons
+                        id={w.id}
+                        path={w.path}
+                        uncommitted={w.uncommitted}
+                        unpushed={w.unpushed}
+                      />
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
 
       <Card id="write-log">
         <CardHeader

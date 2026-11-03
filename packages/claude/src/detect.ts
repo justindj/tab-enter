@@ -128,6 +128,8 @@ export async function detectRtk(deps: DetectDeps = {}): Promise<ToolStatus> {
 
   const result = await run(file, ['--version']);
   const version = parseVersion(result.stdout);
+  // Another tool also ships an `rtk` binary; flag output that doesn't look like RTK.
+  const isRtk = /rtk/i.test(result.stdout);
   return {
     tool: 'rtk',
     installed: true,
@@ -136,10 +138,27 @@ export async function detectRtk(deps: DetectDeps = {}): Promise<ToolStatus> {
     minimumVersion: null,
     meetsMinimum: null,
     loggedIn: null,
-    // Another tool also ships an `rtk` binary; flag output that doesn't look like RTK.
-    detail: /rtk/i.test(result.stdout)
-      ? null
-      : 'Found an `rtk` binary that may not be Rust Token Killer.',
+    detail: isRtk ? null : 'Found an `rtk` binary that may not be Rust Token Killer.',
     checkedAt: now.toISOString(),
+    // Only ask a binary that identified itself as RTK; it reads RTK's local tracking database.
+    savings: isRtk ? parseRtkGain(await run(file, ['gain', '--all', '--format', 'json'])) : null,
   };
+}
+
+/** `rtk gain --all --format json` → its summary block; null if absent or unreadable. */
+export function parseRtkGain(result: CommandResult): ToolStatus['savings'] {
+  if (result.code !== 0 || result.timedOut) return null;
+  try {
+    const summary = (JSON.parse(result.stdout) as { summary?: Record<string, unknown> }).summary;
+    if (!summary) return null;
+    const num = (k: string) => (typeof summary[k] === 'number' ? summary[k] : 0);
+    return {
+      commands: num('total_commands'),
+      inputTokens: num('total_input'),
+      savedTokens: num('total_saved'),
+      avgPct: num('avg_savings_pct'),
+    };
+  } catch {
+    return null;
+  }
 }

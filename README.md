@@ -46,6 +46,7 @@ fixtures/         Invented demo data and recorded Claude Code output
 | M5 Code Review page         | Done                                                        |
 | M6 Verification             | Done                                                        |
 | M7 Gated write actions      | Done                                                        |
+| Spec leftovers              | Done (dark mode, cleanup, coverage, e2e…; see decisions.md) |
 | Later                       | Slack (read-only), Azure DevOps, GitHub, `npx` distribution |
 
 ## License

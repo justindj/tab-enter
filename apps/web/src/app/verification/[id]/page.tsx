@@ -46,7 +46,7 @@ export default async function VerificationArtifactPage({
           src={`/verification/${v.id}/artifact`}
           title={`${v.issueKey} verification slideshow`}
           sandbox="allow-scripts allow-modals"
-          className="h-[78vh] w-full rounded-lg border bg-white"
+          className="h-[78vh] w-full rounded-lg border bg-card"
         />
       ) : (
         <p className="text-sm text-muted-foreground">{v.error ?? 'No slideshow yet.'}</p>

@@ -260,6 +260,44 @@ export class GitLabCodeHost implements CodeHost, CodeHostWriter {
     };
   }
 
+  async getCoverage(ref: MRRef): Promise<{ head: number | null; base: number | null }> {
+    const project = `/projects/${encodeURIComponent(ref.projectId)}`;
+    const coverageOf = async (pipelineId: number | undefined) => {
+      if (!pipelineId) return null;
+      const { data } = await this.http.get<{ coverage?: string | number | null }>(
+        `${project}/pipelines/${pipelineId}`,
+      );
+      const n = data.coverage === null || data.coverage === undefined ? NaN : Number(data.coverage);
+      return Number.isFinite(n) ? n : null;
+    };
+    const raw = await this.single(ref);
+    const [head, base] = await Promise.all([
+      coverageOf(raw.head_pipeline?.id).catch(() => null),
+      this.http
+        .get<{ id: number }[]>(`${project}/pipelines`, {
+          ref: raw.target_branch,
+          status: 'success',
+          per_page: 1,
+        })
+        .then((r) => coverageOf(r.data[0]?.id))
+        .catch(() => null),
+    ]);
+    return { head, base };
+  }
+
+  /** `GET /personal_access_tokens/self` (GitLab 15.5+); older instances or other token types give null. */
+  async getTokenExpiry(): Promise<string | null> {
+    try {
+      const { data } = await this.http.get<{ expires_at?: string | null }>(
+        '/personal_access_tokens/self',
+      );
+      return data.expires_at ?? null;
+    } catch (err) {
+      if (err instanceof ConnectorError && err.kind !== 'network') return null;
+      throw err;
+    }
+  }
+
   // ------------------------------------------------------------ writes (M7)
 
   async postNote(ref: MRRef, body: string): Promise<{ url: string }> {

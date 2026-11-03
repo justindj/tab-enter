@@ -49,6 +49,7 @@ import {
   toolStatus,
   users,
   verificationArtifacts,
+  worktrees,
   writeActionLog,
 } from './schema';
 
@@ -136,6 +137,7 @@ export async function deleteProfileRows(db: Db, profileId: string): Promise<stri
       codeReviews,
       messages,
       writeActionLog,
+      worktrees,
     ]) {
       await tx.delete(table).where(eq(table.profileId, profileId));
     }
@@ -169,6 +171,31 @@ export async function setActiveProfile(
     .onConflictDoUpdate({
       target: [appState.userId, appState.key],
       set: { value: profileId, updatedAt: new Date() },
+    });
+}
+
+// ------------------------------------------------------------------- theme
+
+export type Theme = 'dark' | 'light' | 'system';
+export const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
+const THEME_KEY = 'theme';
+
+/** The UI theme, an app-wide (not per-profile) preference. Dark by default. */
+export async function getTheme(db: Db, userId = LOCAL_USER_ID): Promise<Theme> {
+  const [state] = await db
+    .select()
+    .from(appState)
+    .where(and(eq(appState.userId, userId), eq(appState.key, THEME_KEY)));
+  return THEMES.includes(state?.value as Theme) ? (state!.value as Theme) : 'dark';
+}
+
+export async function setTheme(db: Db, theme: Theme, userId = LOCAL_USER_ID): Promise<void> {
+  await db
+    .insert(appState)
+    .values({ userId, key: THEME_KEY, value: theme, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [appState.userId, appState.key],
+      set: { value: theme, updatedAt: new Date() },
     });
 }
 
@@ -361,6 +388,51 @@ export async function listWriteActions(
     .limit(limit);
 }
 
+// --------------------------------------------------------------- worktrees
+
+export type WorktreeRow = typeof worktrees.$inferSelect;
+
+/** Record what cleanup did (or is asking) for one worktree path. */
+export async function upsertWorktree(
+  db: Db,
+  row: Omit<WorktreeRow, 'id' | 'userId' | 'updatedAt'>,
+  userId = LOCAL_USER_ID,
+): Promise<void> {
+  const updatedAt = new Date();
+  await db
+    .insert(worktrees)
+    .values({ id: randomUUID(), userId, updatedAt, ...row })
+    .onConflictDoUpdate({
+      target: [worktrees.profileId, worktrees.path],
+      set: { ...row, updatedAt },
+    });
+}
+
+export async function listWorktrees(db: Db, profileId: string): Promise<WorktreeRow[]> {
+  return db
+    .select()
+    .from(worktrees)
+    .where(eq(worktrees.profileId, profileId))
+    .orderBy(desc(worktrees.updatedAt));
+}
+
+export async function getWorktree(db: Db, id: string): Promise<WorktreeRow | null> {
+  const [row] = await db.select().from(worktrees).where(eq(worktrees.id, id));
+  return row ?? null;
+}
+
+export async function setWorktreeStatus(
+  db: Db,
+  id: string,
+  status: WorktreeRow['status'],
+  error: string | null = null,
+): Promise<void> {
+  await db
+    .update(worktrees)
+    .set({ status, error, updatedAt: new Date() })
+    .where(eq(worktrees.id, id));
+}
+
 /** Requeue jobs left "running" by a worker that died. */
 export async function requeueStaleJobs(db: Db, lockedBefore: Date): Promise<void> {
   await db
@@ -447,13 +519,16 @@ export async function recordSync(
   db: Db,
   profileId: string,
   source: SyncSource,
-  result: { error?: string },
+  result: { error?: string; tokenExpiresAt?: string | null },
   userId = LOCAL_USER_ID,
 ): Promise<void> {
   const now = new Date();
-  const values = result.error
-    ? { lastAttemptAt: now, lastError: result.error }
-    : { lastAttemptAt: now, lastSyncedAt: now, lastError: null };
+  const values = {
+    ...(result.error
+      ? { lastAttemptAt: now, lastError: result.error }
+      : { lastAttemptAt: now, lastSyncedAt: now, lastError: null }),
+    ...(result.tokenExpiresAt !== undefined ? { tokenExpiresAt: result.tokenExpiresAt } : {}),
+  };
   await db
     .insert(syncState)
     .values({ userId, profileId, source, ...values })

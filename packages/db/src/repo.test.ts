@@ -12,6 +12,7 @@ import {
   finishJob,
   getActiveProfile,
   getSyncStates,
+  getTheme,
   hasPendingJob,
   listIssues,
   lastDailyReportAt,
@@ -25,6 +26,7 @@ import {
   replaceSyncedData,
   requeueStaleJobs,
   setActiveProfile,
+  setTheme,
 } from './repo';
 import { createTestDb } from './test-support';
 
@@ -75,6 +77,16 @@ const mr = (iid: number): MergeRequest => ({
 let db: Db;
 beforeEach(async () => {
   db = await createTestDb();
+});
+
+describe('theme', () => {
+  it('defaults to dark and remembers the choice', async () => {
+    expect(await getTheme(db)).toBe('dark');
+    await setTheme(db, 'light');
+    expect(await getTheme(db)).toBe('light');
+    await setTheme(db, 'system');
+    expect(await getTheme(db)).toBe('system');
+  });
 });
 
 describe('profiles', () => {

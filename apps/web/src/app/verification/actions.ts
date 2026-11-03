@@ -63,6 +63,21 @@ const httpUrl = z
 const ProjectSchema = z.object({
   baseUrl: httpUrl,
   startCommand: z.string().trim().max(500),
+  specCommand: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (v) => !/--reporter/.test(v),
+      'Leave out --reporter; tab-enter adds the JSON reporter itself.',
+    ),
+  uiPages: z
+    .string()
+    .max(4000)
+    .refine(
+      (v) => v.split(/\r?\n/).every((l) => !l.trim() || /^\s*\S+\s*=>\s*\/\S*\s*$/.test(l)),
+      'UI pages: one "glob => /path" per line, e.g. src/api/orders/** => /orders',
+    ),
   username: z.string().trim().max(200),
   password: z.string().max(500),
 });
@@ -87,6 +102,8 @@ export async function saveVerificationSettingsAction(
     const parsed = ProjectSchema.safeParse({
       baseUrl: formData.get(`p${i}.baseUrl`) ?? '',
       startCommand: formData.get(`p${i}.startCommand`) ?? '',
+      specCommand: formData.get(`p${i}.specCommand`) ?? '',
+      uiPages: formData.get(`p${i}.uiPages`) ?? '',
       username: formData.get(`p${i}.username`) ?? '',
       password: formData.get(`p${i}.password`) ?? '',
     });
@@ -115,6 +132,8 @@ export async function saveVerificationSettingsAction(
         ...project.verification,
         baseUrl: v.baseUrl || undefined,
         startCommand: v.startCommand || undefined,
+        specCommand: v.specCommand || undefined,
+        uiPages: v.uiPages.trim() || undefined,
         testCredentialsSecret: secretName,
       },
     };
@@ -122,7 +141,10 @@ export async function saveVerificationSettingsAction(
   const settings = parseProfileSettings({
     ...profile.settings,
     gitlab: { ...profile.settings.gitlab, projects },
-    verification: { captureVideo: formData.get('captureVideo') === 'on' },
+    verification: {
+      captureVideo: formData.get('captureVideo') === 'on',
+      captureBefore: formData.get('captureBefore') === 'on',
+    },
   });
   await updateProfile(db, profile.id, { settings });
   revalidatePath('/', 'layout');

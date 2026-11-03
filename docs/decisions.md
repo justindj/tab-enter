@@ -279,7 +279,7 @@ Checked against docs.gitlab.com on 2026-11-02.
     won't touch their checkout.
   - **Branch names from GitLab** must match a conservative ref pattern. Git is always run with
     argv, never a shell.
-  - **Cleanup** of worktrees for merged MRs comes later, with a confirmation.
+  - **Cleanup** of worktrees for merged MRs: see "Completing the spec".
 - **Runs go through the job queue** as `agent-run` jobs.
   - The worker runs them in a pool beside syncs, at most `claude.maxParallelRuns` per profile. The
     rest wait in the queue.
@@ -426,8 +426,7 @@ Checked against docs.gitlab.com on 2026-11-02.
 - **Changed files come from GitLab's MR diff**, which works for open and merged MRs (a merged
   branch is often deleted). A simple classifier decides "UI" (tsx/vue/svelte/css/html, pages and
   components folders) and "test" files. In Auto mode, UI files mean a walkthrough; otherwise it's
-  test evidence. The user can force either mode. The spec's "configurable mapping" of backend
-  changes to UI pages isn't done; forcing UI mode covers it for now.
+  test evidence. The user can force either mode.
 - **Assessment:** Claude (`short-text`, JSON) marks each acceptance criterion verified, partial or
   not verified, from the walkthrough results, pipeline status and changed tests.
   - **Without Claude** (not approved, or the demo), the assessment is evidence-only, labelled as
@@ -448,11 +447,8 @@ Checked against docs.gitlab.com on 2026-11-02.
   - **Web access:** reading the BlobStore from the web app is the second exception to "web only
     touches SQLite", like the secret store. It's storage behind an interface that becomes object
     storage when hosted.
-- **Not done yet:**
-  - "Before" screenshots, which need the pre-change build.
-  - Coverage deltas: GitLab has `head_pipeline.coverage`, which isn't synced yet.
-  - Running a Playwright spec that already exists in the client repo.
-  - Posting the summary to the MR (M7).
+- **Added after M7:** "before" screenshots, coverage change, the repo's own Playwright specs, and
+  the backend → UI page mapping. See "Completing the spec" below.
 - **Verification jobs run in the same pool as Claude runs** (`maxParallelRuns` per profile), so a
   long walkthrough never blocks syncs.
 
@@ -504,6 +500,90 @@ Checked against docs.gitlab.com on 2026-11-02.
   so the flows can be tried safely.
 - **GitLab tokens need the `api` scope** for any GitLab write. With `read_api` the write fails
   with a 403 that says to check scopes.
+
+## Completing the spec (after M7)
+
+- **Dark mode, dark by default.**
+  - **Options:** Dark, Light or System, chosen in the header or Settings → Appearance.
+  - **Scope:** one app-wide preference (`app_state.theme`), not per profile, since it's about the
+    person, not the client.
+  - **No flash:** the server renders `<html data-theme>`, so the page never flashes the wrong
+    theme.
+  - **System:** follows `prefers-color-scheme`. Tailwind's `dark:` variant covers both cases.
+  - **Native controls:** `color-scheme` is set, so scrollbars and date pickers follow too.
+- **Token expiry warnings** (spec 3, Jira details).
+  - **GitLab:** reports expiry through `GET /personal_access_tokens/self` (15.5+). It's read after
+    each successful sync and stored on `sync_state.token_expires_at`, not in settings, so it can't
+    race the user's edits. Older GitLab gives a 404, which is treated as unknown.
+  - **Jira:** has no such endpoint, so Settings takes the date the user chose when creating the
+    token.
+  - **When it shows:** the header dot turns amber 14 days before expiry and red after it, even if
+    the last sync worked. Test connection also reports GitLab's expiry.
+- **Worktree cleanup** (spec 5).
+  - **When:** after each sync of a profile with local clones, a `cleanup-worktrees` job looks at
+    tab-enter's own worktrees (only under `.tab-enter-worktrees/`).
+  - **Which:** a branch whose MRs are all merged or closed, with none open, is up for cleanup.
+  - **Clean worktrees are removed** with `git worktree remove`, without `--force`, so git itself
+    refuses if something changed since the check.
+  - **Worktrees with local work wait:**
+    - "Local work" means uncommitted files, or commits on no remote (`HEAD --not --remotes`).
+    - These are recorded as needing confirmation. Settings → Worktrees lists them, with what would
+      be lost.
+    - **Remove anyway** (confirmed) queues a `remove-worktree` job that uses `--force`. **Keep**
+      stops tab-enter asking.
+  - **Branches are kept:** local branches are never deleted, so commits survive in the branch.
+  - **Left alone:** detached verification worktrees, which are reused.
+  - **Squash merges:** a GitLab source branch deleted after merge and pruned locally makes its
+    commits look unpushed, so tab-enter asks rather than guesses.
+- **RTK savings** (spec 4.7).
+  - **Source:** tool detection runs `rtk gain --all --format json`. The documented shape has a
+    `summary` with `total_commands`, `total_input`, `total_saved` and `avg_savings_pct`.
+  - **Display:** the Usage panel shows the totals, labelled as RTK's own estimate.
+  - **Scope:** the figures cover all projects. RTK tracks per machine, not per tab-enter profile.
+  - **Safety:** only a binary that identifies itself as RTK is asked. Older RTK without JSON
+    output just shows nothing.
+- **Verification additions** (spec 4.3).
+  - **The repo's own Playwright tests.** A per-project "Playwright tests" command (e.g.
+    `npx playwright test e2e/`) replaces the Claude-written walkthrough for UI tickets, at no AI
+    cost.
+    - **How it runs:** in the change's worktree, through the user's shell, like the start command.
+      tab-enter appends `--reporter=json` and sets `PLAYWRIGHT_JSON_OUTPUT_NAME`.
+    - **Environment:** `BASE_URL`, plus `TEST_USERNAME` / `TEST_PASSWORD` from the keychain when
+      configured. Credentials go in the environment only, and are masked out of any error output.
+    - **Results:** per-test statuses and PNG attachments (up to 12) go into the slideshow and the
+      assessment prompt.
+    - **Time limit:** 10 minutes.
+  - **Backend → UI pages.** One `glob => /path` per line per project. A backend change with
+    matching files gets a goto-and-screenshot smoke check of those pages (at most 8). A page that
+    fails to load counts as an issue.
+  - **"Before" screenshots** (opt-in, Settings → Verification):
+    - **What runs:** after the change's walkthrough, the same steps run against the MR's target
+      branch (a detached worktree), started with the same start command.
+    - **Port handoff:** the first app is stopped and its port confirmed free before the second
+      starts.
+    - **Display:** the slideshow shows the before and after shots side by side.
+    - **Failures don't count:** checks failing on the old code are expected and don't affect the
+      outcome, and they use a 4 s step timeout so they fail fast.
+    - **Scope:** only open MRs; for merged ones the target branch already contains the change.
+  - **Coverage change.** GitLab's pipeline `coverage` for the MR head and for the target branch's
+    latest successful pipeline. The test-evidence slide shows both and the difference. Unknown
+    values are just omitted.
+- **End-to-end tests of tab-enter itself** (spec 9).
+  - **Run:** `pnpm test:e2e` starts the real app (web + worker, via `scripts/dev.mjs`) on a spare
+    port with a throwaway data folder, in demo mode. CI runs it after the build.
+  - **Coverage:**
+    - the token gate
+    - sign-in
+    - the dark default and the theme switch
+    - `g a` navigation
+    - a replayed Claude run
+    - the daily report
+    - a replayed review
+    - a demo verification and its slideshow
+    - Settings
+  - **Browser:** Playwright (`playwright-core`) drives the installed Edge or Chrome.
+  - **Teardown:** kills the whole process tree and waits for it. Otherwise a leftover `next dev`
+    blocks the next start.
 
 ## Worker
 

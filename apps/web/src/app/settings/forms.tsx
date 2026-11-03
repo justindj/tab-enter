@@ -94,6 +94,7 @@ export function ConnectionsForm(props: {
     email: string;
     boardId: string;
     doneStatuses: string;
+    tokenExpiresAt: string;
   };
   gitlab: { baseUrl: string; projects: string };
   storedSecrets: string[];
@@ -171,6 +172,17 @@ export function ConnectionsForm(props: {
             hint="Comma-separated status names to treat as done, e.g. Ready for Release."
           >
             <Input name="jiraDoneStatuses" defaultValue={props.jira.doneStatuses} />
+          </Field>
+          <Field
+            label="Token expires (optional)"
+            hint="Jira doesn't report this, so enter the date you chose when creating the token. tab-enter warns 14 days before."
+          >
+            <Input
+              name="jiraTokenExpiresAt"
+              type="date"
+              defaultValue={props.jira.tokenExpiresAt}
+              className="max-w-48"
+            />
           </Field>
         </div>
         {test && <Result state={test.jira} />}
@@ -301,10 +313,13 @@ export function TemplatesForm(props: {
 export function VerificationSettingsForm(props: {
   profileId: string;
   captureVideo: boolean;
+  captureBefore: boolean;
   projects: {
     label: string;
     baseUrl: string;
     startCommand: string;
+    specCommand: string;
+    uiPages: string;
     hasCredentials: boolean;
     hasClone: boolean;
   }[];
@@ -361,6 +376,29 @@ export function VerificationSettingsForm(props: {
                 placeholder={p.hasCredentials ? '••••••••' : ''}
               />
             </Field>
+            <Field
+              label="Playwright tests (optional)"
+              hint="Your repo’s own specs for UI tickets, run in the worktree instead of a Claude-written walkthrough (no AI cost). They get BASE_URL, TEST_USERNAME and TEST_PASSWORD."
+            >
+              <Input
+                name={`p${i}.specCommand`}
+                defaultValue={p.specCommand}
+                placeholder="npx playwright test e2e/"
+                className="font-mono text-xs"
+              />
+            </Field>
+            <Field
+              label="UI pages for backend changes (optional)"
+              hint="One “glob => /path” per line. A backend change matching a glob gets a screenshot smoke check of that page."
+            >
+              <textarea
+                name={`p${i}.uiPages`}
+                defaultValue={p.uiPages}
+                rows={3}
+                placeholder={'src/api/orders/** => /orders\nsrc/billing/** => /account/billing'}
+                className="w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs placeholder:text-muted-foreground"
+              />
+            </Field>
           </div>
         </fieldset>
       ))}
@@ -369,6 +407,12 @@ export function VerificationSettingsForm(props: {
         defaultChecked={props.captureVideo}
         label="Record video of walkthroughs"
         hint="Off by default: screenshots are smaller and faster."
+      />
+      <Checkbox
+        name="captureBefore"
+        defaultChecked={props.captureBefore}
+        label="Capture “before” screenshots"
+        hint="Also runs the walkthrough on the MR’s target branch for side-by-side shots. Needs a start command; roughly doubles the time."
       />
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={pending}>

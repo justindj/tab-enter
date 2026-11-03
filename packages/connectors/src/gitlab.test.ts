@@ -236,6 +236,41 @@ describe('GitLabCodeHost', () => {
   });
 });
 
+describe('GitLab coverage and token expiry', () => {
+  const small = (routes: Record<string, unknown>) =>
+    fakeFetch(({ url }) => {
+      const p = url.pathname.replace('/api/v4', '');
+      const key = url.search ? `${p}${url.search}` : p;
+      return key in routes ? { body: routes[key] } : p in routes ? { body: routes[p] } : undefined;
+    });
+
+  it('reads pipeline coverage for the MR head and the target branch', async () => {
+    const { fetch, seen } = small({
+      '/projects/42/merge_requests/12': {
+        iid: 12,
+        target_branch: 'main',
+        head_pipeline: { id: 9 },
+      },
+      '/projects/42/pipelines/9': { id: 9, coverage: '81.25' },
+      '/projects/42/pipelines': [{ id: 7 }],
+      '/projects/42/pipelines/7': { id: 7, coverage: null },
+    });
+    expect(await host(fetch).getCoverage({ projectId: '42', iid: 12 })).toEqual({
+      head: 81.25,
+      base: null,
+    });
+    const list = seen.find((r) => r.url.pathname.endsWith('/pipelines'))!;
+    expect(list.url.searchParams.get('ref')).toBe('main');
+    expect(list.url.searchParams.get('status')).toBe('success');
+  });
+
+  it('reads the token expiry, and treats an old GitLab (404) as unknown', async () => {
+    const withExpiry = small({ '/personal_access_tokens/self': { expires_at: '2026-12-01' } });
+    expect(await host(withExpiry.fetch).getTokenExpiry()).toBe('2026-12-01');
+    expect(await host(small({}).fetch).getTokenExpiry()).toBeNull();
+  });
+});
+
 describe('helpers', () => {
   it('maps every GitLab pipeline status', () => {
     expect(mapPipelineStatus('waiting_for_resource')).toBe('pending');

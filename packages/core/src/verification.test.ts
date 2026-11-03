@@ -7,7 +7,11 @@ import {
   classifyFiles,
   deriveOutcome,
   heuristicAssessment,
+  parsePlaywrightReport,
+  parseUiPageMap,
   parseWith,
+  smokeWalkthrough,
+  uiPagesFor,
   verificationSummary,
   WalkthroughSchema,
   walkthroughPrompt,
@@ -164,6 +168,186 @@ describe('slideshow', () => {
         summary: '',
       }),
     ).toBe('Verification of A-1 Reject invalid emails: Passed.\n- Verified: X (seen)');
+  });
+});
+
+describe('repo Playwright tests, smoke checks, before/after and coverage', () => {
+  const report = {
+    suites: [
+      {
+        title: 'login.spec.ts',
+        specs: [
+          {
+            title: 'shows an error for invalid email',
+            tests: [
+              {
+                status: 'expected',
+                results: [
+                  {
+                    status: 'passed',
+                    attachments: [
+                      {
+                        name: 'screenshot',
+                        contentType: 'image/png',
+                        path: '/w/test-results/a.png',
+                      },
+                      { name: 'trace', contentType: 'application/zip', path: '/w/t.zip' },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        suites: [
+          {
+            title: 'remember me',
+            specs: [
+              {
+                title: 'keeps the session',
+                tests: [
+                  {
+                    status: 'unexpected',
+                    results: [
+                      {
+                        status: 'failed',
+                        error: { message: '\u001b[31mTimeout 5000ms\u001b[39m\nat x' },
+                      },
+                    ],
+                  },
+                ],
+              },
+              { title: 'later', tests: [{ status: 'skipped', results: [] }] },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  it('reads the JSON reporter: statuses, first error line, PNG attachments', () => {
+    const r = parsePlaywrightReport(report);
+    expect(r).toMatchObject({
+      passed: 1,
+      failed: 1,
+      skipped: 1,
+      attachments: ['/w/test-results/a.png'],
+    });
+    expect(r.tests[1]).toEqual({
+      title: 'login.spec.ts › remember me › keeps the session',
+      status: 'failed',
+      error: 'Timeout 5000ms',
+    });
+    expect(parsePlaywrightReport(null)).toMatchObject({ passed: 0, tests: [] });
+  });
+
+  it('maps backend files to UI pages, skipping malformed lines', () => {
+    const map = parseUiPageMap(
+      'src/api/orders/** => /orders\nnot a rule\n**/billing/*.go => /billing\n',
+    );
+    expect(map).toEqual([
+      { glob: 'src/api/orders/**', path: '/orders' },
+      { glob: '**/billing/*.go', path: '/billing' },
+    ]);
+    expect(uiPagesFor(['src/api/orders/list.ts', 'svc/billing/x.go'], map)).toEqual([
+      '/orders',
+      '/billing',
+    ]);
+    expect(uiPagesFor(['README.md'], map)).toEqual([]);
+    expect(smokeWalkthrough(['/orders']).steps).toEqual([
+      { action: 'goto', path: '/orders' },
+      { action: 'screenshot', caption: 'Smoke check: /orders' },
+    ]);
+  });
+
+  it('fails the outcome on failing repo tests or smoke pages', () => {
+    const verified = AssessmentSchema.parse({
+      criteria: [{ text: 'x', result: 'verified' }],
+    });
+    const spec = {
+      command: 'npx playwright test',
+      passed: 2,
+      failed: 0,
+      skipped: 0,
+      tests: [],
+      screenshots: [],
+    };
+    expect(deriveOutcome(evidence({ steps: [], spec }), verified)).toBe('passed');
+    expect(deriveOutcome(evidence({ steps: [], spec: { ...spec, failed: 1 } }), verified)).toBe(
+      'issues_found',
+    );
+    expect(
+      deriveOutcome(
+        evidence({
+          smoke: [{ index: 0, step: { action: 'goto', path: '/o' }, ok: false, error: '500' }],
+        }),
+        verified,
+      ),
+    ).toBe('issues_found');
+    // Evidence only: passing repo tests count as UI evidence.
+    expect(heuristicAssessment(issue, evidence({ steps: [], spec }), 'x').criteria[0]!.result).toBe(
+      'partial',
+    );
+  });
+
+  it('shows before/after pairs, repo test results and the coverage change', () => {
+    const html = buildSlideshow({
+      issue,
+      evidence: evidence({
+        steps: [
+          {
+            index: 0,
+            step: { action: 'screenshot', caption: 'Error shown' },
+            ok: true,
+            screenshot: 'a.png',
+            beforeScreenshot: 'before/a.png',
+          },
+        ],
+        coverage: { head: 81.25, base: 82 },
+      }),
+      assessment: heuristicAssessment(issue, evidence(), 'demo'),
+      outcome: 'issues_found',
+      diffExcerpts: [],
+      images: {
+        'a.png': 'data:image/png;base64,AFTER',
+        'before/a.png': 'data:image/png;base64,BEFORE',
+      },
+      generatedAt: new Date('2026-01-01T00:00:00Z'),
+      demo: false,
+    });
+    expect(html).toContain('Before (target branch)');
+    expect(html.indexOf('BEFORE')).toBeLessThan(html.indexOf('AFTER'));
+    expect(html).toContain('Coverage: <strong>81.3%</strong>');
+    expect(html).toContain('-0.8');
+
+    const specHtml = buildSlideshow({
+      issue,
+      evidence: evidence({
+        steps: [],
+        spec: {
+          command: 'npx playwright test e2e/',
+          passed: 1,
+          failed: 1,
+          skipped: 0,
+          tests: [
+            { title: 'ok <one>', status: 'passed' },
+            { title: 'bad', status: 'failed', error: 'Timeout' },
+          ],
+          screenshots: ['spec-01.png'],
+        },
+      }),
+      assessment: heuristicAssessment(issue, evidence(), 'demo'),
+      outcome: 'issues_found',
+      diffExcerpts: [],
+      images: { 'spec-01.png': 'data:image/png;base64,SPEC' },
+      generatedAt: new Date('2026-01-01T00:00:00Z'),
+      demo: false,
+    });
+    expect(specHtml).toContain('Playwright tests');
+    expect(specHtml).toContain('ok &lt;one&gt;');
+    expect(specHtml).toContain('bad — Timeout');
+    expect(specHtml).toContain('base64,SPEC');
+    expect(specHtml).not.toContain('<h1>Walkthrough</h1>');
   });
 });
 

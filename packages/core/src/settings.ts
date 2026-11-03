@@ -113,6 +113,13 @@ const VerificationProjectSchema = z.object({
   baseUrl: z.string().optional(),
   /** Name of a keychain entry holding test-user credentials. Never the credentials themselves. */
   testCredentialsSecret: z.string().optional(),
+  /**
+   * The repo's own Playwright tests for UI tickets, e.g. "npx playwright test e2e/login.spec.ts".
+   * When set it replaces the Claude-written walkthrough (no AI cost).
+   */
+  specCommand: z.string().optional(),
+  /** Backend files → UI pages to smoke-check, one "glob => /path" per line. */
+  uiPages: z.string().optional(),
 });
 
 export const WatchedProjectSchema = z.object({
@@ -143,6 +150,7 @@ export const ProfileSettingsSchema = z.object({
       sprintOnlyDefault: z.boolean().default(true),
       doneStatuses: z.array(z.string()).default([]),
       blockedStatuses: z.array(z.string()).default(['Blocked']),
+      /** Entered by the user (YYYY-MM-DD): Jira's API doesn't report token expiry. */
       tokenExpiresAt: z.string().optional(),
     })
     .prefault({}),
@@ -220,6 +228,8 @@ export const ProfileSettingsSchema = z.object({
   verification: z
     .object({
       captureVideo: z.boolean().default(false),
+      /** Also run the walkthrough on the target branch (needs a start command) for "before" shots. */
+      captureBefore: z.boolean().default(false),
     })
     .prefault({}),
   // Every write action is off by default and still needs a confirmation click when on.
