@@ -1,4 +1,6 @@
+import { getDb, needsSetup } from '@tab-enter/db';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { EmptyState } from '@/components/empty-state';
 import { IssueLink, MRTable } from '@/components/mr-table';
 import { RunList } from '@/components/run-list';
@@ -9,6 +11,8 @@ import { formatTokens, formatUsd, plural, timeAgo } from '@/lib/format';
 import { UpNext } from './up-next';
 
 export default async function NowPage() {
+  // First run: guide the user to connect their own accounts before the demo.
+  if (await needsSetup(await getDb())) redirect('/setup');
   const { workspace, active, now, suggestions, runs, usageToday, runBlocker } = await loadNow();
   const { inFlight, recentlyCompleted, issuesByKey } = workspace;
   const { settings } = active;

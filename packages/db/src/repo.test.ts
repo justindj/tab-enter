@@ -7,6 +7,7 @@ import {
   claimNextJob,
   createProfile,
   deleteProfileRows,
+  dismissSetup,
   enqueueJob,
   ensureDemoProfile,
   finishJob,
@@ -22,6 +23,7 @@ import {
   listMessages,
   saveMessage,
   listProfiles,
+  needsSetup,
   recordSync,
   replaceSyncedData,
   requeueStaleJobs,
@@ -86,6 +88,20 @@ describe('theme', () => {
     expect(await getTheme(db)).toBe('light');
     await setTheme(db, 'system');
     expect(await getTheme(db)).toBe('system');
+  });
+});
+
+describe('first-run setup', () => {
+  it('is offered while only the demo exists, until dismissed or a real profile is made', async () => {
+    await ensureDemoProfile(db);
+    expect(await needsSetup(db)).toBe(true);
+    await dismissSetup(db);
+    expect(await needsSetup(db)).toBe(false);
+
+    const fresh = await createTestDb();
+    await ensureDemoProfile(fresh);
+    await createProfile(fresh, { name: 'Acme' });
+    expect(await needsSetup(fresh)).toBe(false);
   });
 });
 

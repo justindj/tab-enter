@@ -23,8 +23,10 @@ pnpm install
 pnpm dev
 ```
 
-This opens a demo profile with invented data. Your profiles, tokens and history live on each
-machine (`~/.tab-enter` and the OS keychain), so a new machine starts fresh. See [docs/setup.md](docs/setup.md) for requirements
+The first run opens a short setup: name a profile, connect Jira and GitLab (with Test connection),
+and set up Claude Code. Or choose "Explore the demo first" to try it on invented data. Your
+profiles, tokens and history live on each machine (`~/.tab-enter` and the OS keychain), so a new
+machine starts with setup again. See [docs/setup.md](docs/setup.md) for requirements
 and connecting real clients, and [docs/decisions.md](docs/decisions.md) for design decisions.
 
 ## Layout

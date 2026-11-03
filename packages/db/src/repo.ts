@@ -199,6 +199,32 @@ export async function setTheme(db: Db, theme: Theme, userId = LOCAL_USER_ID): Pr
     });
 }
 
+const SETUP_DISMISSED_KEY = 'setupDismissed';
+
+/**
+ * First-run setup is offered while only the demo profile exists, until the
+ * user finishes it or chooses to explore the demo.
+ */
+export async function needsSetup(db: Db, userId = LOCAL_USER_ID): Promise<boolean> {
+  const all = await listProfiles(db, userId);
+  if (all.some((p) => !p.isDemo)) return false;
+  const [state] = await db
+    .select()
+    .from(appState)
+    .where(and(eq(appState.userId, userId), eq(appState.key, SETUP_DISMISSED_KEY)));
+  return state?.value !== true;
+}
+
+export async function dismissSetup(db: Db, userId = LOCAL_USER_ID): Promise<void> {
+  await db
+    .insert(appState)
+    .values({ userId, key: SETUP_DISMISSED_KEY, value: true, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [appState.userId, appState.key],
+      set: { value: true, updatedAt: new Date() },
+    });
+}
+
 /** First run: create the demo profile so the app is explorable with no credentials. */
 export async function ensureDemoProfile(db: Db): Promise<void> {
   await ensureLocalUser(db);

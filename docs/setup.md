@@ -28,13 +28,25 @@ pnpm dev
 
 The link changes on every start. Other local processes and websites can't use the app without it.
 
-On first run you land in the **Demo** profile. It uses the invented data in `fixtures/demo/`,
-needs no credentials, and spends no tokens.
+On first run you land in **Set up tab-enter**, a four-step wizard:
+
+1. **Profile:** name it after the client.
+2. **Jira and GitLab:** the fields described below, with Save and Test connection.
+3. **Claude Code:** shows whether the CLI is installed and logged in, and asks whether Claude Code
+   is approved for this client.
+4. **Finish:** shows each connection's state, optionally removes the demo profile, and opens the
+   app with a sync started.
+
+Choose **Explore the demo first** instead to try the app on the invented data in `fixtures/demo/`.
+It needs no credentials and spends no tokens. While you're in the demo, **Set up your profile** in
+the header returns to the wizard.
 
 The app starts in dark mode. Switch to Light or System with the control at the top right, or in
 Settings → Appearance.
 
 ## Connect a real client
+
+The setup wizard walks through this. To add another client later, or change anything:
 
 1. Go to **Settings → Profiles** and create a profile.
 2. Under **Connections**, enter:

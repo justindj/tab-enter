@@ -585,6 +585,21 @@ Checked against docs.gitlab.com on 2026-11-02.
   - **Teardown:** kills the whole process tree and waits for it. Otherwise a leftover `next dev`
     blocks the next start.
 
+## First-run setup
+
+- **A fresh install opens `/setup`, not the demo.**
+  - **When:** the Now page redirects there while the demo is the only profile, until the user
+    finishes setup or picks "Explore the demo first" (`app_state.setupDismissed`).
+  - **The demo is still one click away:** "Explore the demo first" on the first step, and "Set up
+    your profile" in the header while it's active.
+- **The wizard has four steps:** profile, Jira and GitLab, Claude Code, Finish.
+  - **One URL per step** (`?step=`), so reload and Back work.
+  - **Same forms as Settings:** the connections step reuses Settings' own form, including Save and
+    Test connection. There's no second code path for saving tokens.
+  - **Claude Code:** the step only records the per-client approval. Installing and logging in
+    stay the user's job in a terminal; the step shows the detected status, with Re-check.
+  - **Finish:** removes the demo profile by default (a checkbox), queues a sync, and opens Now.
+
 ## Worker
 
 - **Non-run jobs run one at a time.** Since M3, agent runs have their own pool limited by

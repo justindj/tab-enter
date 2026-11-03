@@ -6,7 +6,9 @@ import { KeyboardShortcuts } from '@/components/shell/keyboard-shortcuts';
 import { Sidebar } from '@/components/shell/sidebar';
 import { SyncPoller } from '@/components/shell/sync-poller';
 import { ThemePicker } from '@/components/shell/theme-picker';
+import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
+import { buttonVariants } from '@/components/ui/button';
 import { loadApp } from '@/lib/data';
 import { timeAgo } from '@/lib/format';
 import './globals.css';
@@ -38,7 +40,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-6 py-2.5">
               <div className="flex items-center gap-3">
                 <ProfileSwitcher profiles={app.profiles} activeId={active.id} />
-                {active.isDemo && <Badge tone="info">Demo mode: invented data</Badge>}
+                {active.isDemo && (
+                  <>
+                    <Badge tone="info">Demo mode: invented data</Badge>
+                    <Link href="/setup" className={buttonVariants({ size: 'sm' })}>
+                      Set up your profile
+                    </Link>
+                  </>
+                )}
               </div>
               <div className="ml-auto flex flex-wrap items-center justify-end gap-3 text-xs text-muted-foreground">
                 <ConnectionStatus connections={app.connections} />
