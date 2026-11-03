@@ -237,7 +237,16 @@
       "createdAt": "2026-01-14T11:00:00.000Z",
       "updatedAt": "2026-01-14T11:00:00.000Z",
       "mergedAt": null,
-      "diff": [],
+      "diff": [
+        {
+          "path": "src/api/wishlist.ts",
+          "diff": "@@ -0,0 +1,18 @@\n+import { db } from '../db';\n+\n+export async function getWishlist(userId: string) {\n+  return db.query(`SELECT * FROM wishlist WHERE user_id = '${userId}'`);\n+}\n+\n+export async function addToWishlist(userId: string, productId: string) {\n+  await db.insert('wishlist', { user_id: userId, product_id: productId });\n+}\n"
+        },
+        {
+          "path": "pnpm-lock.yaml",
+          "diff": "@@ -1,3 +1,4 @@\n lockfileVersion: '9.0'\n+# (lockfile noise that review hygiene excludes)\n"
+        }
+      ],
       "discussions": []
     },
     {

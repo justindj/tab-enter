@@ -86,7 +86,8 @@ export function buildWorkspace(input: WorkspaceInput): Workspace {
   });
 
   const inFlight = views.filter((v) => v.isMine && v.mr.state === 'opened');
-  const activeIssues = input.issues
+  const myIssues = input.issues.filter((i) => i.assignedToMe !== false);
+  const activeIssues = myIssues
     .filter((i) => i.statusCategory !== 'done')
     .sort((a, b) => (a.rank ?? '').localeCompare(b.rank ?? ''))
     .map((issue) => ({
@@ -94,7 +95,7 @@ export function buildWorkspace(input: WorkspaceInput): Workspace {
       mrs: views.filter((v) => v.isMine && v.issueKeys.includes(issue.key)),
     }));
 
-  const recentIssues = input.issues
+  const recentIssues = myIssues
     .filter(
       (i) => i.statusCategory === 'done' && i.completedAt && Date.parse(i.completedAt) >= cutoff,
     )

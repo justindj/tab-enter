@@ -8,6 +8,8 @@ import {
   getDb,
   getJob,
   getRun,
+  listLinks,
+  listRecentRuns,
   listRunEvents,
   requestRunCancel,
   type RunRow,
@@ -62,6 +64,35 @@ export async function startRunAction(input: z.input<typeof StartSchema>): Promis
   });
   revalidatePath('/');
   redirect(`/runs/${runId}`);
+}
+
+/**
+ * Review an MR with Claude (code-review preset, read-only tools). The worker
+ * builds the prompt from the diff, and re-reviews only send what changed.
+ */
+export async function startReviewAction(mrKey: string): Promise<ActionResult> {
+  const { db, profile } = await activeProfile();
+  if (!profile.isDemo && !profile.settings.claude.approvedForClient) {
+    return { error: 'Claude Code is not approved for this client.' };
+  }
+  const links = (await listLinks(db, profile.id)).filter((l) => l.mrKey === mrKey);
+  const active = (await listRecentRuns(db, profile.id, { limit: 50 })).find(
+    (r) =>
+      r.mrKey === mrKey &&
+      r.preset === 'code-review' &&
+      (r.status === 'queued' || r.status === 'running'),
+  );
+  if (active) return { error: 'A review of this merge request is already running.' };
+  await createRun(db, {
+    profileId: profile.id,
+    preset: 'code-review',
+    prompt: '(The worker builds this prompt from the merge request diff.)',
+    modelRequested: profile.settings.claude.presets['code-review'].model,
+    mrKey,
+    issueKey: links[0]?.issueKey ?? null,
+  });
+  revalidatePath('/review');
+  return { ok: 'Review started.' };
 }
 
 export async function continueRunAction(runId: string, prompt: string): Promise<ActionResult> {

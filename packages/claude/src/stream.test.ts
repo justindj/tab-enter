@@ -53,7 +53,7 @@ describe('stream-json parser', () => {
     const [ev] = parseMessage(JSON.parse(fixture('code-review.result.json')));
     expect(ev).toMatchObject({ type: 'result', numTurns: 4, models: ['claude-sonnet-5-5'] });
     if (ev?.type !== 'result') throw new Error('expected result');
-    expect(JSON.parse(ev.resultText ?? '')).toMatchObject({ verdict: 'approve_with_comments' });
+    expect(JSON.parse(ev.resultText ?? '')).toMatchObject({ verdict: 'request_changes' });
   });
 
   it('reports unparseable lines and ignores blank and unknown ones', () => {

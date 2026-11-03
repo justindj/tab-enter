@@ -4,7 +4,7 @@
   "is_error": false,
   "duration_ms": 21000,
   "num_turns": 4,
-  "result": "{\"blockers\":[],\"suggestions\":[{\"file\":\"src/cart/total.ts\",\"line\":14,\"reason\":\"Round once at the end instead of per line item.\"}],\"questions\":[],\"verdict\":\"approve_with_comments\"}",
+  "result": "{\"summary\":\"Adds the wishlist read and write endpoints. The read query is open to SQL injection; otherwise small and clear.\",\"blockers\":[{\"file\":\"src/api/wishlist.ts\",\"line\":4,\"reason\":\"userId is interpolated into SQL. Use a parameterised query.\"}],\"suggestions\":[{\"file\":\"src/api/wishlist.ts\",\"line\":8,\"reason\":\"Ignore duplicate inserts (unique index or ON CONFLICT DO NOTHING) so double clicks don't create two rows.\"}],\"questions\":[\"Should a deleted product disappear from wishlists, or stay with a 'no longer available' label?\"],\"verdict\":\"request_changes\"}",
   "session_id": "5f0c1d2e-0000-4000-8000-000000000002",
   "total_cost_usd": 0.0311,
   "usage": {

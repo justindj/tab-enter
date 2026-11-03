@@ -142,7 +142,9 @@ export function buildDailyReport(input: {
   // Done: tickets completed in the window, each with the MRs merged for it; then other merges.
   const merged = mine.filter((v) => v.mr.state === 'merged' && inWindow(v.mr.mergedAt));
   const doneIssues = [...workspace.issuesByKey.values()]
-    .filter((i) => i.statusCategory === 'done' && inWindow(i.completedAt))
+    .filter(
+      (i) => i.assignedToMe !== false && i.statusCategory === 'done' && inWindow(i.completedAt),
+    )
     .sort((a, b) => Date.parse(a.completedAt!) - Date.parse(b.completedAt!));
   const mentioned = new Set<string>();
   const done: MessageItem[] = doneIssues.map((issue) => {

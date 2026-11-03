@@ -36,7 +36,7 @@ const KIND_PRESET: Record<SuggestionKind, PresetId | null> = {
   'address-feedback': 'address-feedback',
   'fix-pipeline': 'address-feedback',
   'resolve-conflicts': 'address-feedback',
-  // Structured review runs arrive with the Code Review page (M5); copy the prompt until then.
+  // Reviews run from the Code Review page, which builds the prompt from the diff and shows results.
   review: null,
   'next-ticket': 'work-ticket',
 };

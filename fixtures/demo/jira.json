@@ -179,6 +179,27 @@
       "description": "Invoices showed $ for EUR orders.",
       "acceptanceCriteria": ["Symbol matches the order currency"],
       "comments": []
+    },
+    {
+      "key": "SHOP-120",
+      "summary": "Wishlist API",
+      "status": "In Review",
+      "statusCategory": "in_progress",
+      "priority": "Medium",
+      "rank": "0|i00030:",
+      "issueType": "Story",
+      "url": "https://jira.example.test/browse/SHOP-120",
+      "inOpenSprint": true,
+      "updatedAt": "2026-01-14T11:00:00.000Z",
+      "completedAt": null,
+      "description": "Assigned to Sam. Shoppers can save products to a wishlist.",
+      "acceptanceCriteria": [
+        "GET /api/wishlist returns the signed-in user's items",
+        "POST /api/wishlist adds an item once, even on a double click",
+        "Other users' wishlists are never readable"
+      ],
+      "comments": [],
+      "assignedToMe": false
     }
   ]
 }

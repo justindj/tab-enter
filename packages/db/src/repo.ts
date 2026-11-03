@@ -15,6 +15,7 @@ import {
   type MRIssueLink,
   type PresetId,
   type ProfileSettings,
+  type StoredReview,
   type ToolStatus,
 } from '@tab-enter/core';
 import {
@@ -337,7 +338,7 @@ export async function replaceSyncedData(
     inOpenSprint: issue.inOpenSprint,
     rank: issue.rank,
     data: issue,
-    assignedToMe: true,
+    assignedToMe: issue.assignedToMe !== false,
     updatedAt: new Date(issue.updatedAt),
     completedAt: issue.completedAt ? new Date(issue.completedAt) : null,
     syncedAt: now,
@@ -522,6 +523,58 @@ export async function listLinks(db: Db, profileId: string) {
     })
     .from(mrIssueLinks)
     .where(eq(mrIssueLinks.profileId, profileId));
+}
+
+// ----------------------------------------------------------- code reviews
+
+export type CodeReviewRow = Omit<typeof codeReviews.$inferSelect, 'result'> & {
+  result: StoredReview;
+};
+
+export async function saveCodeReview(
+  db: Db,
+  review: {
+    profileId: string;
+    mrKey: string;
+    reviewedSha: string;
+    runId: string;
+    result: StoredReview;
+  },
+  userId = LOCAL_USER_ID,
+): Promise<string> {
+  const id = randomUUID();
+  await db.insert(codeReviews).values({ id, userId, ...review, createdAt: new Date() });
+  return id;
+}
+
+/** Reviews for one MR (newest first), or the latest per MR for a profile. */
+export async function listCodeReviews(
+  db: Db,
+  profileId: string,
+  mrKeyFilter?: string,
+): Promise<CodeReviewRow[]> {
+  const rows = await db
+    .select()
+    .from(codeReviews)
+    .where(
+      and(
+        eq(codeReviews.profileId, profileId),
+        mrKeyFilter ? eq(codeReviews.mrKey, mrKeyFilter) : undefined,
+      ),
+    )
+    .orderBy(desc(codeReviews.createdAt));
+  return rows as CodeReviewRow[];
+}
+
+export async function latestCodeReviews(
+  db: Db,
+  profileId: string,
+): Promise<Map<string, CodeReviewRow>> {
+  const latest = new Map<string, CodeReviewRow>();
+  for (const row of await listCodeReviews(db, profileId)) {
+    if (!latest.has(row.mrKey)) latest.set(row.mrKey, row);
+  }
+  return latest;
 }
 
 // ---------------------------------------------------------------- messages

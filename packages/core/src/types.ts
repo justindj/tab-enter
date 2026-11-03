@@ -37,6 +37,11 @@ export interface IssueDetail extends Issue {
   description: string;
   acceptanceCriteria: string[];
   comments: IssueComment[];
+  /**
+   * False for tickets synced only because an MR I review links to them (for
+   * the review prompt). They never appear in my own work lists.
+   */
+  assignedToMe?: boolean;
 }
 
 export interface MRRef {

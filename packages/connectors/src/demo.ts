@@ -70,18 +70,23 @@ export class DemoIssueTracker implements IssueTracker {
     this.data = anchored(fixture, now);
   }
 
+  /** Tickets assigned to me; others (assignedToMe: false) are only reachable by key. */
+  private get mine() {
+    return this.data.issues.filter((i) => i.assignedToMe !== false);
+  }
+
   async getCurrentUser() {
     return this.data.currentUser;
   }
 
   async listMyActiveIssues({ sprintOnly }: { sprintOnly: boolean }) {
-    return this.data.issues
+    return this.mine
       .filter((i) => i.statusCategory !== 'done' && (!sprintOnly || i.inOpenSprint))
       .map(toIssue);
   }
 
   async listMyRecentlyCompleted(since: Date) {
-    return this.data.issues
+    return this.mine
       .filter(
         (i) =>
           i.statusCategory === 'done' &&
@@ -98,7 +103,7 @@ export class DemoIssueTracker implements IssueTracker {
   }
 
   async rankNextCandidates() {
-    return this.data.issues
+    return this.mine
       .filter((i) => i.statusCategory === 'todo' && i.inOpenSprint)
       .sort((a, b) => (a.rank ?? '').localeCompare(b.rank ?? ''))
       .map(toIssue);

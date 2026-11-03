@@ -345,6 +345,45 @@ Checked against docs.gitlab.com on 2026-11-02.
 - **Keyboard:** with a message card focused (Tab to it), `c` copies it. Typing in the text box
   doesn't trigger it.
 
+## Code Review page (M5)
+
+- **A review is an `agent-run` with the `code-review` preset.**
+  - It runs in a worktree on the MR's source branch, using read-only tools (Read, Grep, Glob) in
+    `dontAsk` mode.
+  - The worker builds the prompt, because it needs the diff: it fetches, fast-forwards the
+    worktree to `origin/<source>`, then `git diff origin/<target>...HEAD`.
+  - If the worktree can't fast-forward, the review uses its HEAD and the log says so.
+  - The demo uses the fixture's diff.
+- **Re-reviews are incremental.** If an earlier review produced a valid result, and its commit
+  still exists, only `<reviewed sha>..HEAD` is sent, with that review's blockers to re-check. After
+  a force-push, the review falls back to the full diff. "Changed since review" compares the last
+  reviewed commit with the MR's synced head.
+- **Diff hygiene:**
+  - Files matching `reviewExcludeGlobs` (lockfiles, snapshots, vendored, minified, generated)
+    are dropped, and the prompt lists them.
+  - The rest is capped at `contextCaps.diffChars`, smallest files first, so one huge file can't
+    crowd out the others. Claude can read anything cut from the worktree.
+  - Globs are matched by a small converter (`**`, `*`, `?`), so the same rule applies to git and
+    demo diffs.
+- **Structured output.**
+  - **Format:** the prompt asks for one JSON object (summary, blockers, suggestions, questions,
+    verdict), validated with zod. A fenced or surrounded object is still found, and "text" or
+    "comment" are accepted as the reason.
+  - **Retry:** if the reply doesn't validate, the run asks once more in the same session with the
+    validation error. Both answers count toward usage.
+  - **Fallback:** if the retry fails too, the raw text is stored and shown.
+  - **Not used yet:** `--json-schema`, which exists in 2.1.309, but its output shape hasn't been
+    checked against a real run. It's a candidate once a logged-in CLI is available.
+- **Teammates' tickets.** Sync now also fetches tickets linked from MRs I review (up to 25,
+  skipping any I can't read), so review prompts get their acceptance criteria. They're stored with
+  `assignedToMe: false` and stay out of Now, Active Work and the daily report.
+- **Results are stored per review** in `code_reviews`, with the reviewed commit, the run, the
+  result or raw text, and any excluded files. The page shows the latest review and has copy
+  actions: blockers, the full review as Markdown, and single comments. It refreshes itself while a
+  review runs.
+- **Approving stays a human click in GitLab.** The verdict is a recommendation only. Posting
+  comments and approving from tab-enter are M7, behind settings and a confirmation.
+
 ## Worker
 
 - **Non-run jobs run one at a time.** Since M3, agent runs have their own pool limited by

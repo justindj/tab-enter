@@ -37,6 +37,8 @@ describe('demo sync', () => {
     // Completed 6 days ago: past the 3-day display retention but inside the 7-day
     // sync horizon that daily reports need (completedSyncDays).
     expect(issues.map((i) => i.key)).toContain('SHOP-096');
+    // A teammate's ticket linked from an MR I review: synced, but not mine.
+    expect(issues.find((i) => i.key === 'SHOP-120')).toMatchObject({ assignedToMe: false });
 
     const mrs = await listMergeRequests(db, profile.id);
     expect(
@@ -98,6 +100,23 @@ describe('live sync', () => {
       const q = url.searchParams;
       if (url.host === 'shop.example.com') {
         if (jiraStatus !== 200) return { status: jiraStatus, body: {} };
+        // Teammates' tickets linked from MRs I review: SHOP-120 is readable, others aren't.
+        const single = /\/rest\/api\/3\/issue\/([A-Z]+-\d+)$/.exec(url.pathname);
+        if (single) {
+          return single[1] === 'SHOP-120'
+            ? {
+                body: {
+                  key: 'SHOP-120',
+                  fields: {
+                    summary: 'Coupon codes',
+                    status: { name: 'In Review', statusCategory: { key: 'indeterminate' } },
+                    issuetype: { name: 'Story' },
+                    updated: '2026-05-31T09:30:00.000+0000',
+                  },
+                },
+              }
+            : { status: 404, body: { errorMessages: ['Issue does not exist'] } };
+        }
         const jql = (body as { jql: string }).jql;
         if (jql.includes('openSprints()')) return { body: jira.sprint };
         if (jql.includes('statusCategory = Done')) return { body: jira.done };
@@ -135,8 +154,10 @@ describe('live sync', () => {
       'SHOP-101',
       'SHOP-112',
       'SHOP-118',
+      'SHOP-120', // linked from MR !21 I review; SHOP-121 (!22) isn't readable and is skipped
     ]);
     expect(issues.find((i) => i.key === 'SHOP-118')).toMatchObject({ inOpenSprint: false });
+    expect(issues.find((i) => i.key === 'SHOP-120')).toMatchObject({ assignedToMe: false });
 
     const mrs = await listMergeRequests(db, id);
     expect(mrs.map((m) => [m.mr.ref.iid, m.isMine, m.needsMyReview]).sort()).toEqual([
@@ -181,7 +202,7 @@ describe('live sync', () => {
       now,
     });
 
-    expect((await listIssues(db, id)).length).toBe(4);
+    expect((await listIssues(db, id)).length).toBe(5); // 4 mine + SHOP-120 from a review
     expect((await listMergeRequests(db, id)).length).toBe(4);
     const states = await getSyncStates(db, id);
     expect(states.find((s) => s.source === 'jira')?.lastError).toMatch(/renew it in Settings/);

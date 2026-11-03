@@ -1,9 +1,18 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ClaudeCodeRunner, ReplayRunner, rtkRunSettings, summarizeEvents } from '@tab-enter/claude';
-import { redactDeep, redactSecrets, type AgentEvent, type AgentRunner } from '@tab-enter/core';
+import {
+  parseReviewResult,
+  redactDeep,
+  redactSecrets,
+  reviewRetryPrompt,
+  type AgentEvent,
+  type AgentRunner,
+  type StoredReview,
+} from '@tab-enter/core';
 import {
   appendRunEvents,
+  saveCodeReview,
   getProfile,
   getProfileDir,
   getRun,
@@ -13,6 +22,7 @@ import {
   type RunRow,
 } from '@tab-enter/db';
 import { resolveWorkspace, type WorkspaceDeps } from '../workspace';
+import { prepareReview, type PreparedReview } from './review';
 
 export interface AgentRunDeps extends WorkspaceDeps {
   fixturesDir: string;
@@ -100,6 +110,20 @@ export async function executeRun(db: Db, runId: string, deps: AgentRunDeps): Pro
     }
   }
 
+  // Code reviews: the worker builds the prompt, since it needs the worktree's diff.
+  let prompt = run.prompt;
+  let review: PreparedReview | null = null;
+  if (run.preset === 'code-review' && run.mrKey) {
+    try {
+      review = await prepareReview(db, profile, run, cwd, deps);
+      prompt = review.prompt;
+      notes.push(...review.notes);
+      await updateRun(db, runId, { prompt });
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   const vars = { artifactsDir: artifactsDir.replace(/\\/g, '/') };
   const runner = deps.runner?.(run, vars) ?? defaultRunner(profile.isDemo, deps.fixturesDir, vars);
 
@@ -141,16 +165,9 @@ export async function executeRun(db: Db, runId: string, deps: AgentRunDeps): Pro
     })();
   }, deps.pollMs ?? 1000);
 
-  try {
+  const stream = async (text: string, resumeSessionId: string | undefined) => {
     for await (const event of runner.run(
-      {
-        runId,
-        cwd,
-        prompt: run.prompt,
-        preset,
-        resumeSessionId: run.sessionId ?? undefined,
-        settingsPath,
-      },
+      { runId, cwd, prompt: text, preset, resumeSessionId, settingsPath },
       controller.signal,
     )) {
       push(event);
@@ -158,6 +175,35 @@ export async function executeRun(db: Db, runId: string, deps: AgentRunDeps): Pro
         await updateRun(db, runId, { sessionId: event.sessionId, modelUsed: event.model });
       }
       if (pending.length >= FLUSH_EVERY) await flush();
+    }
+  };
+
+  let stored: StoredReview | null = null;
+  try {
+    await stream(prompt, run.sessionId ?? undefined);
+    if (review && !cancelled) {
+      // Validate the structured answer; on failure ask once more in the same session.
+      let parsed = parseReviewResult(lastResultText(all) ?? '');
+      const session = summarizeEvents(all).sessionId;
+      if (!parsed.ok && session && lastResultText(all) !== null) {
+        push({
+          type: 'text',
+          text: `[tab-enter] Review reply didn't validate (${parsed.error}); asking once more.`,
+        });
+        await stream(reviewRetryPrompt(parsed.error), session);
+        parsed = parseReviewResult(lastResultText(all) ?? '');
+      }
+      const raw = lastResultText(all);
+      if (raw !== null) {
+        stored = {
+          review: parsed.ok ? parsed.review : null,
+          raw: parsed.ok ? null : raw,
+          error: parsed.ok ? null : parsed.error,
+          incrementalFrom: review.incrementalFrom,
+          excludedFiles: review.excludedFiles,
+          truncated: review.truncated,
+        };
+      }
     }
   } catch (err) {
     push({ type: 'error', message: err instanceof Error ? err.message : String(err) });
@@ -167,8 +213,19 @@ export async function executeRun(db: Db, runId: string, deps: AgentRunDeps): Pro
     await flush();
   }
 
+  if (stored && review && !cancelled) {
+    await saveCodeReview(db, {
+      profileId: profile.id,
+      mrKey: run.mrKey!,
+      reviewedSha: review.headSha,
+      runId,
+      result: stored,
+    });
+  }
+
   const summary = summarizeEvents(all);
   const result = summary.result;
+  const usage = totalUsage(all);
   const status = cancelled ? 'cancelled' : result && !result.isError ? 'succeeded' : 'failed';
   await updateRun(db, runId, {
     status,
@@ -181,12 +238,49 @@ export async function executeRun(db: Db, runId: string, deps: AgentRunDeps): Pro
           `Run ended: ${result?.subtype ?? 'no result'}`)
         : null,
     diffSummary: { filesChanged: summary.filesChanged },
-    inputTokens: result?.usage.inputTokens ?? null,
-    outputTokens: result?.usage.outputTokens ?? null,
-    cacheReadTokens: result?.usage.cacheReadTokens ?? null,
-    cacheCreationTokens: result?.usage.cacheCreationTokens ?? null,
-    costUsd: result?.usage.costUsd ?? null,
-    numTurns: result?.numTurns ?? null,
+    inputTokens: usage?.inputTokens ?? null,
+    outputTokens: usage?.outputTokens ?? null,
+    cacheReadTokens: usage?.cacheReadTokens ?? null,
+    cacheCreationTokens: usage?.cacheCreationTokens ?? null,
+    costUsd: usage?.costUsd ?? null,
+    numTurns: usage?.numTurns ?? null,
     endedAt: new Date(),
   });
+}
+
+function lastResultText(events: AgentEvent[]): string | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]!;
+    if (e.type === 'result') return e.resultText;
+  }
+  return null;
+}
+
+/** Usage across every result in the run (a review retry adds a second one). */
+function totalUsage(events: AgentEvent[]) {
+  const results = events.filter((e) => e.type === 'result');
+  if (results.length === 0) return null;
+  let costKnown = false;
+  const total = results.reduce(
+    (acc, r) => {
+      if (r.usage.costUsd !== null) costKnown = true;
+      return {
+        inputTokens: acc.inputTokens + r.usage.inputTokens,
+        outputTokens: acc.outputTokens + r.usage.outputTokens,
+        cacheReadTokens: acc.cacheReadTokens + r.usage.cacheReadTokens,
+        cacheCreationTokens: acc.cacheCreationTokens + r.usage.cacheCreationTokens,
+        costUsd: acc.costUsd + (r.usage.costUsd ?? 0),
+        numTurns: acc.numTurns + (r.numTurns ?? 0),
+      };
+    },
+    {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+      numTurns: 0,
+    },
+  );
+  return { ...total, costUsd: costKnown ? total.costUsd : null };
 }

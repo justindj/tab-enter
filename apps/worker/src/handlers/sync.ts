@@ -31,6 +31,8 @@ import {
   type SyncedMR,
 } from '@tab-enter/db';
 
+const MAX_REVIEW_TICKETS = 25;
+
 export interface SyncDeps {
   fixturesDir: string;
   /** Required for non-demo profiles. */
@@ -164,6 +166,37 @@ export async function syncProfile(db: Db, profileId: string, deps: SyncDeps): Pr
     mrKey: mrKey(mr.ref),
     links: linkMergeRequest(mr, { keyRegex: settings.keyRegex, manual }),
   }));
+
+  // Tickets of MRs I review (usually someone else's) give review prompts their
+  // acceptance criteria. Best effort: a ticket I can't read is just skipped.
+  if (issuesResult.status === 'fulfilled') {
+    const known = new Set(issues.map((i) => i.key));
+    const reviewing = new Set(
+      mergeRequests
+        .filter((m) => m.isReviewer && m.mr.state === 'opened')
+        .map((m) => mrKey(m.mr.ref)),
+    );
+    const wanted = [
+      ...new Set(
+        links.filter((l) => reviewing.has(l.mrKey)).flatMap((l) => l.links.map((x) => x.issueKey)),
+      ),
+    ]
+      .filter((k) => !known.has(k))
+      .slice(0, MAX_REVIEW_TICKETS);
+    if (wanted.length > 0) {
+      const tracker = connectors.tracker();
+      const extra = await Promise.all(
+        wanted.map((key) =>
+          tracker
+            .getIssue(key)
+            .then((issue) => ({ ...issue, assignedToMe: false }))
+            .catch(() => null),
+        ),
+      );
+      issues.push(...extra.filter((i) => i !== null));
+    }
+  }
+
   await replaceSyncedData(db, profileId, { issues, mergeRequests, links });
 
   await recordSync(

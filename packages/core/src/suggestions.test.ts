@@ -152,7 +152,7 @@ describe('buildSuggestions', () => {
     expect(suggestions.find((s) => s.kind === 'next-ticket')!.projectId).toBe('42');
   });
 
-  it('offers no Claude run for reviews until M5', () => {
+  it('sends reviews to the Code Review page instead of a task run', () => {
     expect(suggestions.find((s) => s.kind === 'review')!.preset).toBeNull();
   });
 });
