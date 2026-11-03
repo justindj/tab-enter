@@ -183,6 +183,11 @@ export const agentRuns = sqliteTable(
     /** The run this one continued, if any. */
     parentRunId: text('parent_run_id'),
     status: text('status').$type<RunStatus>().notNull(),
+    /** Set by the UI; the worker stops the run at its next check. */
+    cancelRequested: integer('cancel_requested', { mode: 'boolean' }).notNull().default(false),
+    /** GitLab project the worktree belongs to. */
+    projectId: text('project_id'),
+    branch: text('branch'),
     cwd: text('cwd'),
     modelRequested: text('model_requested').notNull(),
     modelUsed: text('model_used'),

@@ -84,6 +84,14 @@
       "createdAt": "2026-01-14T15:00:00.000Z",
       "updatedAt": "2026-01-15T11:30:00.000Z",
       "mergedAt": null,
+      "pipelineFailures": [
+        {
+          "job": "unit-tests",
+          "stage": "test",
+          "webUrl": "https://gitlab.example.test/acme/shop/-/jobs/9001",
+          "logTail": "$ pnpm test\n\n FAIL  src/cart/total.test.ts > applies three discounts\nAssertionError: expected 4997 to be 4998\n ❯ src/cart/total.test.ts:41:24\n\n Test Files  1 failed | 37 passed (38)\n      Tests  1 failed | 212 passed (213)\nERROR: Job failed: exit code 1"
+        }
+      ],
       "diff": [],
       "discussions": []
     },

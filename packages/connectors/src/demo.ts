@@ -47,8 +47,20 @@ function toIssue({
   return issue;
 }
 
-function toMR({ role: _r, diff: _d, discussions: _ds, ...mr }: DemoMR): MergeRequest {
-  return mr;
+/** Like the live connector: my open MRs carry their unresolved threads for prompts. */
+function toMR({ role, diff: _d, discussions, ...mr }: DemoMR): MergeRequest {
+  const threads = discussions
+    .filter((d) => !d.resolved && d.notes.length > 0)
+    .map((d) => {
+      const [first, ...replies] = d.notes;
+      return {
+        author: first!.author,
+        body: [first!.body, ...replies.map((r) => `↳ ${r.author}: ${r.body}`)].join('\n'),
+        ...(first!.filePath ? { filePath: first!.filePath } : {}),
+        ...(first!.line ? { line: first!.line } : {}),
+      };
+    });
+  return role === 'author' && mr.state === 'opened' && threads.length ? { ...mr, threads } : mr;
 }
 
 export class DemoIssueTracker implements IssueTracker {

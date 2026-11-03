@@ -6,16 +6,31 @@ import {
   manualOverrideFor,
   mrKey,
   parseProfileSettings,
+  type AgentEvent,
   type IssueDetail,
   type Job,
   type JobType,
   type ManualLink,
   type MergeRequest,
   type MRIssueLink,
+  type PresetId,
   type ProfileSettings,
   type ToolStatus,
 } from '@tab-enter/core';
-import { and, asc, desc, eq, inArray, lte } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 import type { Db } from './client';
 import {
   agentRuns,
@@ -228,13 +243,36 @@ export async function hasPendingJob(db: Db, type: JobType, profileId?: string): 
   return rows.length > 0;
 }
 
-/** Atomically take the oldest runnable job. */
-export async function claimNextJob(db: Db, now = new Date()): Promise<JobRow | null> {
+export interface ClaimFilter {
+  /** Only these job types. */
+  types?: JobType[];
+  /** Any type except these. */
+  excludeTypes?: JobType[];
+  /** Skip jobs for these profiles (e.g. ones at their parallel-run limit). */
+  excludeProfileIds?: string[];
+}
+
+/** Atomically take the oldest runnable job matching `filter`. */
+export async function claimNextJob(
+  db: Db,
+  now = new Date(),
+  filter: ClaimFilter = {},
+): Promise<JobRow | null> {
   return db.transaction(async (tx) => {
     const [next] = await tx
       .select()
       .from(jobs)
-      .where(and(eq(jobs.status, 'queued'), lte(jobs.runAfter, now)))
+      .where(
+        and(
+          eq(jobs.status, 'queued'),
+          lte(jobs.runAfter, now),
+          filter.types?.length ? inArray(jobs.type, filter.types) : undefined,
+          filter.excludeTypes?.length ? notInArray(jobs.type, filter.excludeTypes) : undefined,
+          filter.excludeProfileIds?.length
+            ? or(isNull(jobs.profileId), notInArray(jobs.profileId, filter.excludeProfileIds))
+            : undefined,
+        ),
+      )
       .orderBy(asc(jobs.createdAt))
       .limit(1);
     if (!next) return null;
@@ -244,6 +282,11 @@ export async function claimNextJob(db: Db, now = new Date()): Promise<JobRow | n
       .where(and(eq(jobs.id, next.id), eq(jobs.status, 'queued')));
     return { ...next, status: 'running' as const, lockedAt: now, attempts: next.attempts + 1 };
   });
+}
+
+export async function getJob(db: Db, id: string): Promise<JobRow | null> {
+  const [row] = await db.select().from(jobs).where(eq(jobs.id, id));
+  return row ?? null;
 }
 
 export async function finishJob(db: Db, id: string, error?: string): Promise<void> {
@@ -481,11 +524,214 @@ export async function listLinks(db: Db, profileId: string) {
     .where(eq(mrIssueLinks.profileId, profileId));
 }
 
-export async function listRecentRuns(db: Db, profileId: string, limit = 10) {
+// -------------------------------------------------------------------- runs
+
+export type RunRow = typeof agentRuns.$inferSelect;
+
+export async function listRecentRuns(
+  db: Db,
+  profileId: string,
+  opts: { limit?: number; issueKey?: string } = {},
+): Promise<RunRow[]> {
   return db
     .select()
     .from(agentRuns)
-    .where(eq(agentRuns.profileId, profileId))
+    .where(
+      and(
+        eq(agentRuns.profileId, profileId),
+        opts.issueKey ? eq(agentRuns.issueKey, opts.issueKey) : undefined,
+      ),
+    )
     .orderBy(desc(agentRuns.createdAt))
+    .limit(opts.limit ?? 10);
+}
+
+export interface NewRun {
+  profileId: string;
+  preset: PresetId;
+  prompt: string;
+  modelRequested: string;
+  issueKey?: string | null;
+  mrKey?: string | null;
+  projectId?: string | null;
+  /** Continue: resume this run's session in its working directory. */
+  parentRunId?: string | null;
+}
+
+/** Insert a queued run and the job that executes it. */
+export async function createRun(db: Db, run: NewRun, userId = LOCAL_USER_ID): Promise<string> {
+  const id = randomUUID();
+  const parent = run.parentRunId ? await getRun(db, run.parentRunId) : null;
+  await db.insert(agentRuns).values({
+    id,
+    userId,
+    profileId: run.profileId,
+    preset: run.preset,
+    prompt: run.prompt,
+    modelRequested: run.modelRequested,
+    issueKey: run.issueKey ?? parent?.issueKey ?? null,
+    mrKey: run.mrKey ?? parent?.mrKey ?? null,
+    projectId: run.projectId ?? parent?.projectId ?? null,
+    parentRunId: parent?.id ?? null,
+    sessionId: parent?.sessionId ?? null,
+    cwd: parent?.cwd ?? null,
+    branch: parent?.branch ?? null,
+    status: 'queued',
+    createdAt: new Date(),
+  });
+  await enqueueJob(db, { type: 'agent-run', profileId: run.profileId, runId: id }, { userId });
+  return id;
+}
+
+export async function getRun(db: Db, id: string): Promise<RunRow | null> {
+  const [row] = await db.select().from(agentRuns).where(eq(agentRuns.id, id));
+  return row ?? null;
+}
+
+export async function updateRun(
+  db: Db,
+  id: string,
+  patch: Partial<Omit<RunRow, 'id' | 'userId' | 'profileId'>>,
+): Promise<void> {
+  await db.update(agentRuns).set(patch).where(eq(agentRuns.id, id));
+}
+
+/** Queued runs are cancelled at once; running ones are flagged for the worker to stop. */
+export async function requestRunCancel(db: Db, id: string): Promise<void> {
+  const run = await getRun(db, id);
+  if (!run) return;
+  if (run.status === 'queued') {
+    await updateRun(db, id, { status: 'cancelled', cancelRequested: true, endedAt: new Date() });
+  } else if (run.status === 'running') {
+    await updateRun(db, id, { cancelRequested: true });
+  }
+}
+
+export async function appendRunEvents(
+  db: Db,
+  run: { id: string; profileId: string },
+  events: { seq: number; event: AgentEvent }[],
+): Promise<void> {
+  if (events.length === 0) return;
+  const createdAt = new Date();
+  for (const chunk of chunks(events)) {
+    await db
+      .insert(runEvents)
+      .values(chunk.map((e) => ({ runId: run.id, profileId: run.profileId, createdAt, ...e })));
+  }
+}
+
+export async function listRunEvents(
+  db: Db,
+  runId: string,
+  afterSeq = -1,
+  limit = 500,
+): Promise<{ seq: number; event: AgentEvent; createdAt: Date }[]> {
+  return db
+    .select({ seq: runEvents.seq, event: runEvents.event, createdAt: runEvents.createdAt })
+    .from(runEvents)
+    .where(and(eq(runEvents.runId, runId), gt(runEvents.seq, afterSeq)))
+    .orderBy(asc(runEvents.seq))
     .limit(limit);
+}
+
+/** Running runs per profile, for the parallel-run limit. */
+export async function countRunningRuns(db: Db): Promise<Map<string, number>> {
+  const rows = await db
+    .select({ profileId: agentRuns.profileId, n: sql<number>`count(*)` })
+    .from(agentRuns)
+    .where(eq(agentRuns.status, 'running'))
+    .groupBy(agentRuns.profileId);
+  return new Map(rows.map((r) => [r.profileId, Number(r.n)]));
+}
+
+/** Runs left "running" by a worker that died can't be resumed mid-stream; mark them failed. */
+export async function failOrphanedRuns(db: Db): Promise<number> {
+  const orphaned = await db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(eq(agentRuns.status, 'running'));
+  for (const { id } of orphaned) {
+    await updateRun(db, id, {
+      status: 'failed',
+      error:
+        'The worker stopped while this run was in progress. Continue it to resume the session.',
+      endedAt: new Date(),
+    });
+  }
+  return orphaned.length;
+}
+
+export interface UsageRow {
+  key: string;
+  runs: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+}
+
+export interface UsageSummary {
+  total: UsageRow;
+  today: UsageRow;
+  byDay: UsageRow[];
+  byPreset: UsageRow[];
+  byTicket: UsageRow[];
+}
+
+/** Tokens and cost as Claude Code reported them, since `since`. Days are local dates. */
+export async function usageSummary(db: Db, profileId: string, since: Date, now = new Date()) {
+  const rows = await db
+    .select({
+      createdAt: agentRuns.createdAt,
+      preset: agentRuns.preset,
+      issueKey: agentRuns.issueKey,
+      inputTokens: agentRuns.inputTokens,
+      outputTokens: agentRuns.outputTokens,
+      cacheReadTokens: agentRuns.cacheReadTokens,
+      costUsd: agentRuns.costUsd,
+    })
+    .from(agentRuns)
+    .where(and(eq(agentRuns.profileId, profileId), gte(agentRuns.createdAt, since)));
+
+  const empty = (key: string): UsageRow => ({
+    key,
+    runs: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    costUsd: 0,
+  });
+  const add = (row: UsageRow, r: (typeof rows)[number]) => {
+    row.runs++;
+    row.inputTokens += r.inputTokens ?? 0;
+    row.outputTokens += r.outputTokens ?? 0;
+    row.cacheReadTokens += r.cacheReadTokens ?? 0;
+    row.costUsd += r.costUsd ?? 0;
+  };
+  const day = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const group = (keyOf: (r: (typeof rows)[number]) => string) => {
+    const map = new Map<string, UsageRow>();
+    for (const r of rows) {
+      const k = keyOf(r);
+      add(map.get(k) ?? map.set(k, empty(k)).get(k)!, r);
+    }
+    return [...map.values()];
+  };
+
+  const total = empty('total');
+  const today = empty(day(now));
+  for (const r of rows) {
+    add(total, r);
+    if (day(r.createdAt) === today.key) add(today, r);
+  }
+  const summary: UsageSummary = {
+    total,
+    today,
+    byDay: group((r) => day(r.createdAt)).sort((a, b) => b.key.localeCompare(a.key)),
+    byPreset: group((r) => r.preset).sort((a, b) => b.costUsd - a.costUsd),
+    byTicket: group((r) => r.issueKey ?? '(no ticket)').sort((a, b) => b.costUsd - a.costUsd),
+  };
+  return summary;
 }

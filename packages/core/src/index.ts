@@ -8,3 +8,6 @@ export * from './interfaces';
 export * from './workspace';
 export * from './connections';
 export * from './active-work';
+export * from './context';
+export * from './templates';
+export * from './suggestions';

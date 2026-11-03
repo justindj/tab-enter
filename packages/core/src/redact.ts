@@ -25,3 +25,21 @@ export function redactSecrets(text: string): string {
   out = out.replace(KEYED, (_m, prefix: string) => `${prefix}${REDACTED}`);
   return out;
 }
+
+/**
+ * Redact every string inside a JSON-like value (e.g. a run event) and cap each
+ * at `maxChars`, so one huge tool result can't bloat the run log.
+ */
+export function redactDeep<T>(value: T, maxChars = 20_000): T {
+  if (typeof value === 'string') {
+    const red = redactSecrets(value);
+    return (red.length > maxChars ? `${red.slice(0, maxChars)}\n[… truncated]` : red) as T;
+  }
+  if (Array.isArray(value)) return value.map((v) => redactDeep(v, maxChars)) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, redactDeep(v, maxChars)]),
+    ) as T;
+  }
+  return value;
+}

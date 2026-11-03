@@ -1,16 +1,19 @@
 import { formatWatchedProjects, type ToolStatus } from '@tab-enter/core';
+import { getDb, usageSummary, type UsageRow, type UsageSummary } from '@tab-enter/db';
+import { EmptyState } from '@/components/empty-state';
 import type { ReactNode } from 'react';
 import { requestToolDetection } from '@/app/actions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { loadApp } from '@/lib/data';
-import { timeAgo } from '@/lib/format';
+import { formatTokens, formatUsd, plural, timeAgo } from '@/lib/format';
 import {
   ClaudeSettingsForm,
   ConnectionsForm,
   CreateProfileForm,
   DeleteProfileButton,
+  TemplatesForm,
 } from './forms';
 
 function ToolRow({
@@ -62,9 +65,66 @@ function ToolRow({
   );
 }
 
+function UsagePanel({
+  usage,
+  presets,
+}: {
+  usage: UsageSummary;
+  presets: Record<string, { label: string }>;
+}) {
+  if (usage.total.runs === 0) {
+    return <EmptyState title="No runs in the last 7 days" />;
+  }
+  const table = (title: string, rows: UsageRow[], label: (k: string) => string) => (
+    <div>
+      <h3 className="mb-1 text-xs font-semibold">{title}</h3>
+      <table className="w-full text-xs tabular-nums">
+        <tbody>
+          {rows.slice(0, 8).map((r) => (
+            <tr key={r.key} className="border-b last:border-0">
+              <td className="py-1 pr-2">{label(r.key)}</td>
+              <td className="py-1 pr-2 text-right text-muted-foreground">
+                {plural(r.runs, 'run')}
+              </td>
+              <td className="py-1 pr-2 text-right text-muted-foreground">
+                {formatTokens(r.inputTokens + r.outputTokens)}
+              </td>
+              <td className="py-1 text-right">{formatUsd(r.costUsd)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+  return (
+    <CardBody className="grid gap-4">
+      <p className="text-sm">
+        {plural(usage.total.runs, 'run')} ·{' '}
+        {formatTokens(usage.total.inputTokens + usage.total.outputTokens)} (plus{' '}
+        {formatTokens(usage.total.cacheReadTokens)} read from cache) ·{' '}
+        <strong>{formatUsd(usage.total.costUsd)}</strong>
+      </p>
+      <div className="grid gap-4 md:grid-cols-3">
+        {table('Per day', usage.byDay, (k) => k)}
+        {table('Per preset', usage.byPreset, (k) => presets[k]?.label ?? k)}
+        {table('Per ticket', usage.byTicket, (k) => k)}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        RTK savings (`rtk gain`) will show here once RTK reporting is wired up.
+      </p>
+    </CardBody>
+  );
+}
+
 export default async function SettingsPage() {
   const { profiles, active, tools, now } = await loadApp();
   const s = active.settings;
+  const usage = await usageSummary(
+    await getDb(),
+    active.id,
+    new Date(now.getTime() - 7 * 86_400_000),
+    now,
+  );
 
   return (
     <div className="mx-auto grid max-w-4xl gap-5">
@@ -173,11 +233,31 @@ export default async function SettingsPage() {
             maxParallelRuns={s.claude.maxParallelRuns}
             rtkMode={s.rtk.mode}
             rtkInstalled={tools.rtk?.installed ?? false}
+            perRunUsd={s.claude.softLimits.perRunUsd}
+            perDayUsd={s.claude.softLimits.perDayUsd}
           />
           <p className="mt-4 text-xs text-muted-foreground">
             RTK model routing, proxy and telemetry stay off. Each would send client content to
             another service and needs its own opt-in.
           </p>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Usage"
+          description="Tokens and cost as Claude Code reported them, last 7 days, this profile."
+        />
+        <UsagePanel usage={usage} presets={s.claude.presets} />
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Prompt templates"
+          description="One per Up next suggestion. You can still edit each prompt before running it."
+        />
+        <CardBody>
+          <TemplatesForm key={active.id} profileId={active.id} templates={s.promptTemplates} />
         </CardBody>
       </Card>
 

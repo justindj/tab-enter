@@ -2,7 +2,10 @@
 
 import { createGitLabHost, createJiraTracker } from '@tab-enter/connectors';
 import {
+  DEFAULT_TEMPLATES,
   isIssueKey,
+  SUGGESTION_KINDS,
+  type SuggestionKind,
   parseProfileSettings,
   parseWatchedProjects,
   redactSecrets,
@@ -247,11 +250,19 @@ export async function testConnectionsAction(profileId: string): Promise<Connecti
   return { jira, gitlab };
 }
 
+const optionalUsd = z
+  .string()
+  .trim()
+  .transform((v) => (v === '' ? undefined : Number(v)))
+  .refine((v) => v === undefined || (Number.isFinite(v) && v > 0), 'Limits are positive amounts.');
+
 const ClaudeSettingsSchema = z.object({
   profileId: z.string(),
   approvedForClient: z.literal('on').optional(),
   maxParallelRuns: z.coerce.number().int().min(1).max(8),
   rtkMode: z.enum(['off', 'global', 'per-run']),
+  perRunUsd: optionalUsd,
+  perDayUsd: optionalUsd,
 });
 
 export async function saveClaudeSettingsAction(
@@ -268,10 +279,42 @@ export async function saveClaudeSettingsAction(
       ...profile.settings.claude,
       approvedForClient: input.approvedForClient === 'on',
       maxParallelRuns: input.maxParallelRuns,
+      softLimits: { perRunUsd: input.perRunUsd, perDayUsd: input.perDayUsd },
     },
     rtk: { ...profile.settings.rtk, mode: input.rtkMode },
   });
   await updateProfile(await getDb(), profile.id, { settings });
   revalidatePath('/', 'layout');
   return { ok: 'Saved.' };
+}
+
+const template = z.string().max(20_000);
+const TemplatesSchema = z.object({
+  profileId: z.string(),
+  'next-ticket': template,
+  'address-feedback': template,
+  'fix-pipeline': template,
+  'resolve-conflicts': template,
+  review: template,
+} satisfies Record<SuggestionKind | 'profileId', z.ZodString>);
+
+/** Save prompt templates. An emptied template falls back to the default. */
+export async function saveTemplatesAction(
+  _prev: ActionResult,
+  formData: FormData,
+): Promise<ActionResult> {
+  const parsed = TemplatesSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input.' };
+  const input = parsed.data;
+  const profile = await requireProfile(input.profileId);
+  const promptTemplates = Object.fromEntries(
+    SUGGESTION_KINDS.map((k) => [
+      k,
+      input[k].trim() ? input[k].replace(/\r\n/g, '\n') : DEFAULT_TEMPLATES[k],
+    ]),
+  );
+  const settings = parseProfileSettings({ ...profile.settings, promptTemplates });
+  await updateProfile(await getDb(), profile.id, { settings });
+  revalidatePath('/', 'layout');
+  return { ok: 'Templates saved. Suggestions use them right away.' };
 }

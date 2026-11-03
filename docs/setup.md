@@ -57,6 +57,24 @@ The worker then syncs every 5 minutes (Settings → sync interval) and on **Refr
 GitLab sync independently: if one fails, its last good data stays on screen and the header dot for
 it turns red with the reason.
 
+## Run Claude Code from tab-enter
+
+1. Install the Claude Code CLI so `claude` is on PATH, and run `claude auth login`. Click
+   **Re-check** in Settings → Tools.
+2. In Settings → Connections → **Watched projects**, add each project with its local clone:
+   `group/project = C:\code\project`. Runs never touch that checkout. They work in a git
+   worktree next to it, under `.tab-enter-worktrees/`.
+3. In Settings → Claude Code, tick **Claude Code is approved for this client**. Until you do,
+   every AI button is replaced by Copy prompt.
+4. On **Now → Up next**, edit the prompt if you like, then **Run in Claude Code**. The run page
+   streams Claude's work live, and from it you can:
+   - **Cancel** the run.
+   - **Continue** in the same session.
+   - **Open in terminal**, which runs `claude --resume` in the worktree so you can take over.
+
+Runs can commit locally but never push. Pushing and opening MRs are separate, confirmed actions
+(M7). In the Demo profile, runs replay recorded output and cost nothing.
+
 ## Environment variables
 
 | Variable               | Default                    | Purpose                                                             |
@@ -89,6 +107,9 @@ pnpm db:generate     # after editing packages/db/src/schema.ts
 | Jira or GitLab: "rejected the token (401)" | The token expired or was revoked. Create a new one and paste it in Settings → Connections.                                                                                          |
 | "Can't resolve …" / "Can't reach …"        | The host isn't reachable from this machine. Connect to the VPN for internal instances, or check the URL.                                                                            |
 | "returned a web page instead of API data"  | The URL points at a login/SSO or VPN page, or isn't the instance root. Use the base URL (no `/jira` path unless your instance has one).                                             |
+| Run fails: "Set a local clone path…"       | Add `= C:\path\to\clone` after the project in Settings → Watched projects.                                                                                                          |
+| Run fails: "Branch … is checked out in …"  | That branch is checked out in your own clone. Switch your clone to another branch so tab-enter can make a separate worktree.                                                        |
+| Run fails: "The worker stopped…"           | The worker restarted mid-run. Open the run and use **Continue** to pick the session back up.                                                                                        |
 | Jira: no issues under "Current sprint"     | Your issues aren't in an open sprint, or the board id is wrong. Toggle to **All** to check.                                                                                         |
 | "No OS keychain is available"              | Set `TAB_ENTER_PASSPHRASE` and restart.                                                                                                                                             |
 | `EPERM … unlink …\.next\…` during build    | A sync client (e.g. OneDrive) is locking build output. Delete `apps/web/.next` and rebuild, or keep the repo outside synced folders.                                                |

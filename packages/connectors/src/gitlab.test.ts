@@ -30,6 +30,10 @@ function server() {
         return { body: q.get('state') === 'opened' ? gl.reviewOpen : [] };
       }
     }
+    const jobs = /^\/projects\/42\/pipelines\/(\d+)\/jobs$/.exec(p);
+    if (jobs && q.get('scope[]') === 'failed') return { body: gl.pipelineJobs[jobs[1]!] ?? [] };
+    const trace = /^\/projects\/42\/jobs\/(\d+)\/trace$/.exec(p);
+    if (trace && gl.traces[trace[1]!]) return { body: gl.traces[trace[1]!], text: true };
     const m = /^\/projects\/(\d+)\/merge_requests\/(\d+)(\/\w+)?$/.exec(p);
     if (m) {
       const key = `${m[1]}!${m[2]}`;
@@ -98,6 +102,37 @@ describe('GitLabCodeHost', () => {
       linesRemoved: 1,
       headSha: 'aaa111',
     });
+  });
+
+  it('adds unresolved thread text and failed-job log tails to my open MRs', async () => {
+    const { fetch, seen } = server();
+    const [mine] = await host(fetch).listMyOpenMRs();
+    expect(mine!.threads).toEqual([
+      {
+        author: 'riley',
+        body: 'Please handle uppercase domains.',
+        filePath: 'src/login.ts',
+        line: 14,
+      },
+    ]);
+    expect(mine!.pipelineFailures).toEqual([
+      {
+        job: 'unit-tests',
+        stage: 'test',
+        webUrl: 'https://gitlab.example.com/acme/shop/-/jobs/8001',
+        logTail: expect.stringContaining('AssertionError: expected true to be false'),
+      },
+    ]);
+    expect(mine!.pipelineFailures![0]!.logTail).not.toContain('\u001b');
+    // allow_failure jobs are skipped
+    expect(seen.some((r) => r.url.pathname.endsWith('/jobs/8002/trace'))).toBe(false);
+  });
+
+  it('does not fetch threads or logs for other people’s MRs', async () => {
+    const { fetch, seen } = server();
+    const reviews = await host(fetch).listReviewRequests({ includeCompleted: false });
+    expect(reviews.every((m) => m.threads === undefined)).toBe(true);
+    expect(seen.some((r) => r.url.pathname.includes('/pipelines/'))).toBe(false);
   });
 
   it('returns every project when none are watched', async () => {

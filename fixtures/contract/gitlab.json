@@ -137,6 +137,29 @@
       "merged_at": null
     }
   ],
+  "pipelineJobs": {
+    "7001": [
+      {
+        "id": 8001,
+        "name": "unit-tests",
+        "stage": "test",
+        "status": "failed",
+        "allow_failure": false,
+        "web_url": "https://gitlab.example.com/acme/shop/-/jobs/8001"
+      },
+      {
+        "id": 8002,
+        "name": "lint-optional",
+        "stage": "test",
+        "status": "failed",
+        "allow_failure": true,
+        "web_url": "https://gitlab.example.com/acme/shop/-/jobs/8002"
+      }
+    ]
+  },
+  "traces": {
+    "8001": "\u001b[0Ksection_start:1:step_script\r\u001b[0K$ pnpm test\n\u001b[31mFAIL\u001b[0m src/login.test.ts\nAssertionError: expected true to be false\nERROR: Job failed: exit code 1\n"
+  },
   "single": {
     "42!12": {
       "head_pipeline": { "id": 7001, "status": "failed" },

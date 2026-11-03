@@ -7,10 +7,13 @@ import {
   getSyncStates,
   hasPendingJob,
   listProfiles,
+  type ClaimFilter,
   type Db,
 } from '@tab-enter/db';
+import { executeRun, type AgentRunDeps } from './handlers/agent-run';
 import { deleteProfileFiles } from './handlers/delete-profile-files';
 import { detectTools } from './handlers/detect-tools';
+import { openTerminal, type OpenTerminalDeps } from './handlers/open-terminal';
 import { syncProfile } from './handlers/sync';
 
 export interface WorkerDeps {
@@ -19,6 +22,9 @@ export interface WorkerDeps {
   credentials?: CredentialProvider;
   fetch?: FetchLike;
   log?: (message: string) => void;
+  /** Overrides for agent runs and terminals (tests). */
+  run?: Omit<AgentRunDeps, 'fixturesDir'>;
+  terminal?: OpenTerminalDeps;
 }
 
 async function dispatch(db: Db, job: Job, deps: WorkerDeps): Promise<void> {
@@ -33,30 +39,99 @@ async function dispatch(db: Db, job: Job, deps: WorkerDeps): Promise<void> {
       });
     case 'delete-profile-files':
       return deleteProfileFiles(job.profileId);
+    case 'agent-run':
+      return executeRun(db, job.runId, { fixturesDir: deps.fixturesDir, ...deps.run });
+    case 'open-terminal':
+      return openTerminal(db, job, deps.terminal);
   }
 }
 
-/** Run one queued job. Returns false when the queue is empty. */
-export async function processNextJob(db: Db, deps: WorkerDeps): Promise<boolean> {
-  const row = await claimNextJob(db);
-  if (!row) return false;
+/** Run one queued job matching `filter`. Returns the job's promise, or null when none is queued. */
+export async function startNextJob(
+  db: Db,
+  deps: WorkerDeps,
+  filter: ClaimFilter = {},
+): Promise<{ profileId: string | null; done: Promise<void> } | null> {
+  const row = await claimNextJob(db, new Date(), filter);
+  if (!row) return null;
   const log = deps.log ?? console.log;
   const parsed = JobSchema.safeParse(row.payload);
   if (!parsed.success) {
     await finishJob(db, row.id, `Invalid job payload: ${parsed.error.message}`);
-    return true;
+    return { profileId: row.profileId, done: Promise.resolve() };
   }
   const started = Date.now();
-  try {
-    await dispatch(db, parsed.data, deps);
-    await finishJob(db, row.id);
-    log(`job ${row.type} done in ${Date.now() - started}ms`);
-  } catch (err) {
-    const message = redactSecrets(err instanceof Error ? err.message : String(err));
-    await finishJob(db, row.id, message);
-    log(`job ${row.type} failed: ${message}`);
-  }
+  const done = (async () => {
+    try {
+      await dispatch(db, parsed.data, deps);
+      await finishJob(db, row.id);
+      log(`job ${row.type} done in ${Date.now() - started}ms`);
+    } catch (err) {
+      const message = redactSecrets(err instanceof Error ? err.message : String(err));
+      await finishJob(db, row.id, message);
+      log(`job ${row.type} failed: ${message}`);
+    }
+  })();
+  return { profileId: row.profileId, done };
+}
+
+/** Run one queued non-run job to completion. Returns false when the queue is empty. */
+export async function processNextJob(
+  db: Db,
+  deps: WorkerDeps,
+  filter: ClaimFilter = { excludeTypes: ['agent-run'] },
+): Promise<boolean> {
+  const started = await startNextJob(db, deps, filter);
+  if (!started) return false;
+  await started.done;
   return true;
+}
+
+/**
+ * Agent runs execute concurrently, beside syncs, up to each profile's
+ * `claude.maxParallelRuns`; the rest stay queued.
+ */
+export class RunPool {
+  private readonly active = new Map<string, number>();
+  private readonly running = new Set<Promise<void>>();
+
+  constructor(
+    private readonly db: Db,
+    private readonly deps: WorkerDeps,
+  ) {}
+
+  get size(): number {
+    return this.running.size;
+  }
+
+  /** Start as many queued runs as capacity allows. */
+  async fill(): Promise<void> {
+    const limits = new Map(
+      (await listProfiles(this.db)).map((p) => [p.id, p.settings.claude.maxParallelRuns]),
+    );
+    for (;;) {
+      const full = [...this.active]
+        .filter(([id, n]) => n >= (limits.get(id) ?? 2))
+        .map(([id]) => id);
+      const started = await startNextJob(this.db, this.deps, {
+        types: ['agent-run'],
+        excludeProfileIds: full,
+      });
+      if (!started) return;
+      const id = started.profileId ?? '';
+      this.active.set(id, (this.active.get(id) ?? 0) + 1);
+      const tracked = started.done.finally(() => {
+        this.active.set(id, (this.active.get(id) ?? 1) - 1);
+        this.running.delete(tracked);
+      });
+      this.running.add(tracked);
+    }
+  }
+
+  /** Wait for every started run (tests, shutdown). */
+  async drain(): Promise<void> {
+    while (this.running.size > 0) await Promise.all([...this.running]);
+  }
 }
 
 /** Queue a sync for each profile whose interval has elapsed. */

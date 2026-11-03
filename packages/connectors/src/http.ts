@@ -81,10 +81,20 @@ export class HttpClient {
     return this.request<T>('POST', path, { body });
   }
 
+  /** A plain-text endpoint (e.g. a CI job log). Same retries and error mapping. */
+  async getText(path: string): Promise<string> {
+    const res = await this.request<string>('GET', path, { text: true });
+    return res.data;
+  }
+
   async request<T>(
     method: 'GET' | 'POST',
     path: string,
-    { query, body }: { query?: Record<string, string | number | undefined>; body?: unknown } = {},
+    {
+      query,
+      body,
+      text = false,
+    }: { query?: Record<string, string | number | undefined>; body?: unknown; text?: boolean } = {},
   ): Promise<HttpResponse<T>> {
     const url = new URL(this.opts.baseUrl + path);
     for (const [k, v] of Object.entries(query ?? {})) {
@@ -95,7 +105,7 @@ export class HttpClient {
 
     for (let attempt = 0; ; attempt++) {
       const headers: Record<string, string> = {
-        Accept: 'application/json',
+        Accept: text ? 'text/plain, */*' : 'application/json',
         ...(await this.opts.getHeaders()),
       };
       if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -122,6 +132,7 @@ export class HttpClient {
         continue;
       }
       if (!res.ok) throw await this.toError(res);
+      if (text) return { data: (await res.text()) as T, headers: res.headers };
 
       const type = res.headers.get('Content-Type') ?? '';
       if (!type.includes('json')) {

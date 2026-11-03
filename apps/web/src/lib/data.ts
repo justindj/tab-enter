@@ -1,5 +1,5 @@
 import 'server-only';
-import { buildWorkspace, deriveConnections } from '@tab-enter/core';
+import { buildSuggestions, buildWorkspace, deriveConnections } from '@tab-enter/core';
 import {
   ensureDemoProfile,
   getActiveProfile,
@@ -12,6 +12,8 @@ import {
   listManualLinks,
   listMergeRequests,
   listProfiles,
+  listRecentRuns,
+  usageSummary,
 } from '@tab-enter/db';
 import { cache } from 'react';
 
@@ -55,6 +57,18 @@ export const loadApp = cache(async () => {
     retentionDays: active.settings.timeWindows.recentRetentionDays,
   });
 
+  const claude = tools.claude;
+  // Demo profiles replay recorded runs; real ones need approval and a working CLI.
+  const runBlocker = active.isDemo
+    ? null
+    : !active.settings.claude.approvedForClient
+      ? 'Claude Code is not approved for this client (Settings).'
+      : !claude?.installed
+        ? 'Claude Code is not installed (Settings).'
+        : claude.loggedIn === false
+          ? 'Claude Code is logged out: run `claude auth login`.'
+          : null;
+
   const lastSyncedAt = syncStates.reduce<Date | null>(
     (min, s) => (s.lastSyncedAt && (!min || s.lastSyncedAt < min) ? s.lastSyncedAt : min),
     null,
@@ -67,6 +81,8 @@ export const loadApp = cache(async () => {
     workspace,
     sync: { lastSyncedAt, error: syncError, syncing },
     tools,
+    /** Why Run in Claude Code is unavailable, or null when it can run. */
+    runBlocker,
     connections: deriveConnections({
       isDemo: active.isDemo,
       settings: active.settings,
@@ -79,3 +95,21 @@ export const loadApp = cache(async () => {
 });
 
 export type AppData = Awaited<ReturnType<typeof loadApp>>;
+
+/** Now page extras: suggestions, recent runs and today's usage. */
+export const loadNow = cache(async () => {
+  const app = await loadApp();
+  const db = await getDb();
+  const dayStart = new Date(app.now);
+  dayStart.setHours(0, 0, 0, 0);
+  const [runs, usage] = await Promise.all([
+    listRecentRuns(db, app.active.id, { limit: 8 }),
+    usageSummary(db, app.active.id, dayStart, app.now),
+  ]);
+  return {
+    ...app,
+    suggestions: buildSuggestions(app.workspace, app.active.settings),
+    runs,
+    usageToday: usage.today,
+  };
+});

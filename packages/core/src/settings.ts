@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_TEMPLATES } from './templates';
 
 // Per-profile settings. Secrets are never stored here: only the *names* of
 // keychain entries live on the profile row (see packages/secrets).
@@ -183,6 +184,15 @@ export const ProfileSettingsSchema = z.object({
       commentsCount: z.number().int().nonnegative().default(5),
       jobLogTailLines: z.number().int().positive().default(120),
       diffChars: z.number().int().positive().default(60000),
+    })
+    .prefault({}),
+  promptTemplates: z
+    .object({
+      'next-ticket': z.string().default(DEFAULT_TEMPLATES['next-ticket']),
+      'address-feedback': z.string().default(DEFAULT_TEMPLATES['address-feedback']),
+      'fix-pipeline': z.string().default(DEFAULT_TEMPLATES['fix-pipeline']),
+      'resolve-conflicts': z.string().default(DEFAULT_TEMPLATES['resolve-conflicts']),
+      review: z.string().default(DEFAULT_TEMPLATES.review),
     })
     .prefault({}),
   reviewExcludeGlobs: z

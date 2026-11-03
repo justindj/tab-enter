@@ -1,11 +1,14 @@
-import type {
-  MergeRequest,
-  MRDetail,
-  MRRef,
-  MRState,
-  PipelineStatus,
-  User,
-  WatchedProject,
+import {
+  stripAnsi,
+  type MergeRequest,
+  type MRDetail,
+  type MRRef,
+  type MRState,
+  type MRThread,
+  type PipelineFailure,
+  type PipelineStatus,
+  type User,
+  type WatchedProject,
 } from '@tab-enter/core';
 import { HttpClient, mapLimit, type HttpClientOptions } from './http';
 import { ConnectorError, type CodeHost } from './types';
@@ -53,7 +56,7 @@ interface GlMR {
   has_conflicts?: boolean;
   sha?: string | null;
   diff_refs?: { head_sha?: string } | null;
-  head_pipeline?: { status?: string } | null;
+  head_pipeline?: { id?: number; status?: string } | null;
   references?: { full?: string };
   created_at: string;
   updated_at: string;
@@ -88,6 +91,42 @@ interface GlDiff {
   diff: string;
   too_large?: boolean;
   collapsed?: boolean;
+}
+
+interface GlJob {
+  id: number;
+  name: string;
+  stage: string;
+  web_url?: string;
+  allow_failure?: boolean;
+}
+
+const MAX_FAILED_JOBS = 3;
+const MAX_LOG_LINES = 300;
+const MAX_THREADS = 20;
+const MAX_THREAD_BODY = 2000;
+
+/** First note of each unresolved thread: what the reviewer asked for. */
+export function unresolvedThreads(discussions: GlDiscussion[]): MRThread[] {
+  return discussions
+    .filter((d) => (d.notes ?? []).some((n) => n.resolvable && !n.resolved))
+    .slice(0, MAX_THREADS)
+    .map((d) => {
+      const first = (d.notes ?? []).find((n) => !n.system) ?? d.notes![0]!;
+      const replies = (d.notes ?? []).filter((n) => n !== first && !n.system);
+      const body = [
+        first.body,
+        ...replies.map((r) => `↳ ${r.author?.username ?? 'unknown'}: ${r.body}`),
+      ]
+        .join('\n')
+        .slice(0, MAX_THREAD_BODY);
+      return {
+        author: first.author?.username ?? 'unknown',
+        body,
+        ...(first.position?.new_path ? { filePath: first.position.new_path } : {}),
+        ...(first.position?.new_line ? { line: first.position.new_line } : {}),
+      };
+    });
 }
 
 const PER_PAGE = 100;
@@ -158,7 +197,8 @@ export class GitLabCodeHost implements CodeHost {
 
   async listMyOpenMRs(): Promise<MergeRequest[]> {
     const raws = await this.list({ scope: 'created_by_me', state: 'opened' });
-    return this.enrichAll(raws);
+    // Only my own MRs get thread text and failed-job logs, for feedback/pipeline prompts.
+    return this.enrichAll(raws, { forPrompts: true });
   }
 
   async listMyRecentlyMergedMRs(since: Date): Promise<MergeRequest[]> {
@@ -294,18 +334,64 @@ export class GitLabCodeHost implements CodeHost {
    * List rows lack the pipeline, approvals and threads, so each MR is fetched
    * again. Threads and line counts only matter while an MR is open.
    */
-  private enrichAll(raws: GlMR[]): Promise<MergeRequest[]> {
+  private enrichAll(raws: GlMR[], { forPrompts = false } = {}): Promise<MergeRequest[]> {
     return mapLimit(raws, this.opts.concurrency ?? 4, async (row) => {
       const open = row.state === 'opened';
       const ref = { projectId: String(row.project_id), iid: row.iid };
-      return (await this.load(ref, { withDiscussions: open, withDiffs: open })).mr;
+      const { mr, discussions, raw } = await this.load(ref, {
+        withDiscussions: open,
+        withDiffs: open,
+      });
+      if (!open || !forPrompts) return mr;
+      const threads = unresolvedThreads(discussions);
+      const failures =
+        mr.pipelineStatus === 'failed' && raw.head_pipeline?.id
+          ? await this.pipelineFailures(ref.projectId, raw.head_pipeline.id)
+          : [];
+      return {
+        ...mr,
+        ...(threads.length ? { threads } : {}),
+        ...(failures.length ? { pipelineFailures: failures } : {}),
+      };
     });
+  }
+
+  /** Failed jobs of a pipeline with the end of each log (best effort: errors give none). */
+  private async pipelineFailures(
+    projectId: string,
+    pipelineId: number,
+  ): Promise<PipelineFailure[]> {
+    const project = `/projects/${encodeURIComponent(projectId)}`;
+    try {
+      const { data: jobs } = await this.http.get<GlJob[]>(
+        `${project}/pipelines/${pipelineId}/jobs`,
+        { 'scope[]': 'failed', per_page: PER_PAGE },
+      );
+      return await mapLimit(
+        jobs.filter((j) => !j.allow_failure).slice(0, MAX_FAILED_JOBS),
+        2,
+        async (job) => {
+          const log = await this.http
+            .getText(`${project}/jobs/${job.id}/trace`)
+            .catch(() => '(log unavailable)');
+          return {
+            job: job.name,
+            stage: job.stage,
+            ...(job.web_url ? { webUrl: job.web_url } : {}),
+            logTail: stripAnsi(log).split('\n').slice(-MAX_LOG_LINES).join('\n'),
+          };
+        },
+      );
+    } catch (err) {
+      if (err instanceof ConnectorError && err.kind !== 'network') return [];
+      throw err;
+    }
   }
 
   private async load(
     ref: MRRef,
     { withDiscussions, withDiffs }: { withDiscussions: boolean; withDiffs: boolean },
-  ): Promise<{ mr: MergeRequest; discussions: GlDiscussion[]; diffs: GlDiff[] }> {
+  ): Promise<{ mr: MergeRequest; raw: GlMR; discussions: GlDiscussion[]; diffs: GlDiff[] }> {
     const [raw, approvals, discussions, diffs] = await Promise.all([
       this.single(ref),
       this.approvals(ref),
@@ -350,7 +436,7 @@ export class GitLabCodeHost implements CodeHost {
       updatedAt: raw.updated_at,
       mergedAt: raw.merged_at ?? null,
     };
-    return { mr, discussions, diffs };
+    return { mr, raw, discussions, diffs };
   }
 }
 

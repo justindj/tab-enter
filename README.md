@@ -41,8 +41,9 @@ fixtures/         Invented demo data and recorded Claude Code output
 | M0 Scaffold                 | Done (Claude CLI flags verified on 2.1.309)                 |
 | M1 Jira + GitLab connectors | Done (contract-tested; not yet run against a live instance) |
 | M2 Active Work page         | Done                                                        |
-| M3 Claude Code runner + Now | Next                                                        |
-| M4–M7                       | Planned (see spec)                                          |
+| M3 Claude Code runner + Now | Done (real runs not yet tried: no logged-in CLI on PATH)    |
+| M4 Communication page       | Next                                                        |
+| M5–M7                       | Planned (see spec)                                          |
 
 ## License
 

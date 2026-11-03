@@ -1,16 +1,27 @@
 import Link from 'next/link';
-import { ComingSoon, EmptyState } from '@/components/empty-state';
+import { EmptyState } from '@/components/empty-state';
 import { IssueLink, MRTable } from '@/components/mr-table';
+import { RunList } from '@/components/run-list';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardBody, CardHeader } from '@/components/ui/card';
-import { loadApp } from '@/lib/data';
-import { plural, timeAgo } from '@/lib/format';
+import { Card, CardHeader } from '@/components/ui/card';
+import { loadNow } from '@/lib/data';
+import { formatTokens, formatUsd, plural, timeAgo } from '@/lib/format';
+import { UpNext } from './up-next';
 
 export default async function NowPage() {
-  const { workspace, active, tools, now } = await loadApp();
+  const { workspace, active, now, suggestions, runs, usageToday, runBlocker } = await loadNow();
   const { inFlight, recentlyCompleted, issuesByKey } = workspace;
-  const claude = tools.claude;
-  const retention = active.settings.timeWindows.recentRetentionDays;
+  const { settings } = active;
+  const retention = settings.timeWindows.recentRetentionDays;
+  const presetLabels = Object.fromEntries(
+    Object.entries(settings.claude.presets).map(([id, p]) => [id, p.label]),
+  );
+  const projects = settings.gitlab.projects
+    .filter((p) => p.localPath)
+    .map((p) => ({ id: p.id, label: p.path || p.id }));
+  const overDaily =
+    settings.claude.softLimits.perDayUsd !== undefined &&
+    usageToday.costUsd > settings.claude.softLimits.perDayUsd;
 
   return (
     <div className="mx-auto grid max-w-6xl gap-5">
@@ -30,31 +41,57 @@ export default async function NowPage() {
         )}
       </Card>
 
+      <Card>
+        <CardHeader
+          title="Up next"
+          description={
+            runBlocker
+              ? `Ranked suggestions with editable prompts. ${runBlocker} Until then, copy the prompts.`
+              : active.isDemo
+                ? 'Ranked suggestions with editable prompts. Runs in the demo replay recorded output and cost nothing.'
+                : 'Ranked suggestions with editable prompts. Runs work in a git worktree per ticket and never push.'
+          }
+        />
+        <UpNext
+          suggestions={suggestions}
+          runBlocker={runBlocker}
+          isDemo={active.isDemo}
+          projects={projects}
+        />
+      </Card>
+
       <div className="grid gap-5 lg:grid-cols-2">
         <Card>
           <CardHeader
             title="Claude Code runs"
             description={
-              claude?.installed
-                ? `claude ${claude.version ?? ''} detected`
-                : 'Claude Code is not installed. See Settings.'
+              usageToday.runs > 0 ? (
+                <span className={overDaily ? 'text-warning' : undefined}>
+                  Today: {plural(usageToday.runs, 'run')} ·{' '}
+                  {formatTokens(usageToday.inputTokens + usageToday.outputTokens)} ·{' '}
+                  {formatUsd(usageToday.costUsd)}
+                  {overDaily &&
+                    ` (over your ${formatUsd(settings.claude.softLimits.perDayUsd!)} daily limit)`}
+                </span>
+              ) : (
+                'No runs today'
+              )
+            }
+            actions={
+              runs.length > 0 && (
+                <Link href="/runs" className="text-xs text-muted-foreground hover:underline">
+                  All runs
+                </Link>
+              )
             }
           />
-          <CardBody>
-            {active.settings.claude.approvedForClient ? (
-              <ComingSoon milestone="M3">
-                Live and recent runs, with tokens, cost and session links.
-              </ComingSoon>
-            ) : (
-              <EmptyState title="Claude Code is not approved for this client">
-                Turn it on in{' '}
-                <Link href="/settings" className="underline">
-                  Settings
-                </Link>
-                . Until then, AI actions become Copy prompt.
-              </EmptyState>
-            )}
-          </CardBody>
+          {runs.length === 0 ? (
+            <EmptyState title="No runs yet">
+              Run a suggestion from Up next to see it here.
+            </EmptyState>
+          ) : (
+            <RunList runs={runs} now={now} presetLabels={presetLabels} />
+          )}
         </Card>
 
         <Card>
@@ -93,17 +130,6 @@ export default async function NowPage() {
           )}
         </Card>
       </div>
-
-      <Card>
-        <CardHeader title="Up next" description="Ranked suggestions with editable prompts" />
-        <CardBody>
-          <ComingSoon milestone="M3">
-            Feedback to address, failing pipelines, conflicts, reviews requested of you, then your
-            next ticket, each with a pre-filled prompt you can run in Claude Code, open in a
-            terminal, or copy.
-          </ComingSoon>
-        </CardBody>
-      </Card>
     </div>
   );
 }

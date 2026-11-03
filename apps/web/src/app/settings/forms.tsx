@@ -1,11 +1,18 @@
 'use client';
 
+import {
+  DEFAULT_TEMPLATES,
+  SUGGESTION_KINDS,
+  TEMPLATE_VARIABLES,
+  type SuggestionKind,
+} from '@tab-enter/core';
 import { useActionState, useTransition, useState } from 'react';
 import {
   createProfileAction,
   deleteProfileAction,
   saveClaudeSettingsAction,
   saveConnectionsAction,
+  saveTemplatesAction,
   testConnectionsAction,
   type ActionResult,
   type ConnectionTestResult,
@@ -220,12 +227,78 @@ export function ConnectionsForm(props: {
   );
 }
 
+const TEMPLATE_LABELS: Record<SuggestionKind, string> = {
+  'next-ticket': 'Next ticket',
+  'address-feedback': 'Address MR feedback',
+  'fix-pipeline': 'Fix a failing pipeline',
+  'resolve-conflicts': 'Resolve merge conflicts',
+  review: 'Review a merge request',
+};
+
+export function TemplatesForm(props: {
+  profileId: string;
+  templates: Record<SuggestionKind, string>;
+}) {
+  const [state, action, pending] = useActionState(saveTemplatesAction, {});
+  const [values, setValues] = useState(props.templates);
+  return (
+    <form action={action} className="grid gap-4">
+      <input type="hidden" name="profileId" value={props.profileId} />
+      <p className="text-xs text-muted-foreground">
+        Variables:{' '}
+        {TEMPLATE_VARIABLES.map((v) => (
+          <code key={v} className="mr-1.5">
+            {`{{${v}}}`}
+          </code>
+        ))}
+        . A line whose variables are all empty is left out. Description, comments and logs are
+        trimmed to the context caps.
+      </p>
+      {SUGGESTION_KINDS.map((kind) => (
+        <Field
+          key={kind}
+          label={TEMPLATE_LABELS[kind]}
+          hint={
+            values[kind] !== DEFAULT_TEMPLATES[kind] ? (
+              <button
+                type="button"
+                className="underline-offset-2 hover:underline"
+                onClick={() => setValues({ ...values, [kind]: DEFAULT_TEMPLATES[kind] })}
+              >
+                Reset to default
+              </button>
+            ) : (
+              'Default template'
+            )
+          }
+        >
+          <textarea
+            name={kind}
+            value={values[kind]}
+            onChange={(e) => setValues({ ...values, [kind]: e.target.value })}
+            rows={8}
+            className="w-full rounded-md border bg-background px-2 py-1.5 font-mono text-xs"
+          />
+        </Field>
+      ))}
+      <div className="flex items-center gap-3">
+        <Button type="submit" disabled={pending}>
+          Save templates
+        </Button>
+        <Result state={state} />
+      </div>
+    </form>
+  );
+}
+
 export function ClaudeSettingsForm(props: {
   profileId: string;
   approvedForClient: boolean;
   maxParallelRuns: number;
   rtkMode: 'off' | 'global' | 'per-run';
   rtkInstalled: boolean;
+  perRunUsd?: number;
+  perDayUsd?: number;
 }) {
   const [state, action, pending] = useActionState(saveClaudeSettingsAction, {});
   return (
@@ -261,6 +334,32 @@ export function ClaudeSettingsForm(props: {
             <option value="global">Global (you ran `rtk init --global`)</option>
             <option value="per-run">Per-run</option>
           </Select>
+        </Field>
+        <Field
+          label="Soft limit per run (USD)"
+          hint="Runs over this are flagged. Nothing is stopped."
+        >
+          <Input
+            name="perRunUsd"
+            type="number"
+            min={0}
+            step="0.01"
+            defaultValue={props.perRunUsd ?? ''}
+            className="w-28"
+          />
+        </Field>
+        <Field
+          label="Soft limit per day (USD)"
+          hint="The Now page warns once today's runs pass it."
+        >
+          <Input
+            name="perDayUsd"
+            type="number"
+            min={0}
+            step="0.01"
+            defaultValue={props.perDayUsd ?? ''}
+            className="w-28"
+          />
         </Field>
       </div>
       <div className="flex items-center gap-3">

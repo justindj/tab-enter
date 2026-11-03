@@ -76,6 +76,28 @@ export interface MergeRequest {
   createdAt: string;
   updatedAt: string;
   mergedAt: string | null;
+  /**
+   * Unresolved review threads (first note of each, trimmed), synced for my
+   * open MRs so feedback prompts can quote them. Absent on older rows.
+   */
+  threads?: MRThread[];
+  /** Failed jobs of the head pipeline with a log tail, synced for my open MRs. */
+  pipelineFailures?: PipelineFailure[];
+}
+
+export interface MRThread {
+  author: string;
+  body: string;
+  filePath?: string;
+  line?: number;
+}
+
+export interface PipelineFailure {
+  job: string;
+  stage: string;
+  webUrl?: string;
+  /** Last lines of the job log, ANSI codes stripped. Context builders trim it further. */
+  logTail: string;
 }
 
 export interface MRDiscussionNote {

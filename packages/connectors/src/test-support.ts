@@ -21,9 +21,17 @@ export interface FakeReply {
   status?: number;
   body: unknown;
   headers?: Record<string, string>;
+  /** Serve `body` (a string) as text/plain instead of JSON, e.g. a CI job log. */
+  text?: boolean;
 }
 
-export function jsonResponse({ status = 200, body, headers = {} }: FakeReply): Response {
+export function jsonResponse({ status = 200, body, headers = {}, text }: FakeReply): Response {
+  if (text) {
+    return new Response(String(body), {
+      status,
+      headers: { 'Content-Type': 'text/plain', ...headers },
+    });
+  }
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json', ...headers },

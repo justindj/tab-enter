@@ -251,9 +251,69 @@ Checked against docs.gitlab.com on 2026-11-02.
   - A change recomputes that MR's links at once, in SQLite only, without waiting for a sync.
 - **Claude Code runs per ticket** have a placeholder in the expanded row until M3.
 
+## Claude Code runner and Now page (M3)
+
+- **The suggestion engine** (`packages/core/suggestions.ts`) is plain code. Order: feedback →
+  failing pipeline → conflicts → reviews waiting on me → next tickets (up to 3, unstarted, in the
+  sprint, with no open MR, in rank order). An MR appears once, under its most urgent reason, and the
+  reason line lists everything that applies. Review suggestions only offer Copy prompt until the
+  structured review run arrives in M5.
+- **Prompts come from per-profile templates** (Settings → Prompt templates) filled by context
+  builders. A line whose variables are all empty is dropped, so a ticket with no comments doesn't
+  leave an empty "Recent comments:" heading. Edits on the Now page apply to that run only.
+- **Thread text and failed-job logs are synced for my open MRs only.**
+  - Unresolved threads come from the discussions the sync already fetches.
+  - For a failed head pipeline, sync fetches its failed jobs (`/pipelines/:id/jobs?scope[]=failed`,
+    skipping `allow_failure` ones) and the last 300 lines of up to 3 job logs (`/jobs/:id/trace`).
+  - The context builder then sends an error-focused tail capped at `contextCaps.jobLogTailLines`:
+    the earliest error line near the end, plus the tail. This costs a few requests per failing MR,
+    and only for MRs that are mine and failing.
+- **Worktrees:** one per ticket (or `mr-<iid>`), at
+  `<clone parent>/.tab-enter-worktrees/<repo>/<key>`. The user's checkout is never switched. Only
+  `git fetch` and `git worktree add` touch the repository.
+  - **New tickets** get `feature/<KEY>-<slug>` from `origin/HEAD` (falling back to
+    `origin/main`/`master`).
+  - **MRs** check out their source branch.
+  - **A branch already in one of our worktrees** is reused. A branch checked out in the user's own
+    clone is refused with an explanation, since git allows a branch in only one worktree and we
+    won't touch their checkout.
+  - **Branch names from GitLab** must match a conservative ref pattern. Git is always run with
+    argv, never a shell.
+  - **Cleanup** of worktrees for merged MRs comes later, with a confirmation.
+- **Runs go through the job queue** as `agent-run` jobs.
+  - The worker runs them in a pool beside syncs, at most `claude.maxParallelRuns` per profile. The
+    rest wait in the queue.
+  - Events are redacted (`redactDeep`, strings capped at 20k characters) and written to
+    `run_events` in batches. The UI polls for them every second; one developer doesn't need
+    WebSockets.
+  - Cancel sets `cancel_requested`. The worker checks it every second and kills the process.
+  - A run left "running" when the worker dies is marked failed at the next start. It can be
+    continued, since the session survives.
+- **Continue** creates a child run with the same session (`--resume`), folder and preset.
+- **Open in terminal** is a worker job that starts `claude --resume <session>` (or plain `claude`
+  in the worktree, from a suggestion; the prompt is copied first).
+  - **Windows:** Windows Terminal (`wt -d`), falling back to `cmd /c start`.
+  - **macOS:** Terminal.app via `osascript`.
+  - **Linux:** the first of x-terminal-emulator, gnome-terminal, konsole, xterm.
+  - **Guards:** session ids must be UUIDs, and paths with shell-special characters are refused.
+- **Gating:** Run in Claude Code is disabled, with the reason shown, until the profile is
+  approved for Claude Code, `claude` is installed, and it isn't logged out. The worker checks the
+  approval again before running. Demo profiles skip all of this: they replay
+  `fixtures/claude/*.jsonl` at a visible pace and cost nothing.
+- **Usage** is what Claude Code reports in its result event: tokens, cache reads and `total_cost_usd`.
+  It is shown per day, preset and ticket in Settings, with today's total on Now. Soft limits only
+  warn.
+- **RTK per-run mode** writes a run-only settings file with RTK's `PreToolUse` Bash hook
+  (`rtk hook claude`, per RTK's source and install docs) and passes it with `--settings`. If RTK
+  isn't installed, the run goes ahead without it and the log says so.
+  - **Not verified yet:** no RTK was installed to check against `rtk init --show`.
+  - **Telemetry:** unless the profile opts in, the run's settings set `DO_NOT_TRACK=1`. RTK's own
+    telemetry switch also needs checking.
+  - **Savings** from `rtk gain` aren't in the Usage panel yet.
+
 ## Worker
 
-- **Jobs run one at a time in M0.** In M3, agent runs get their own pool limited by
+- **Non-run jobs run one at a time.** Since M3, agent runs have their own pool limited by
   `claude.maxParallelRuns` (default 2), so a long run doesn't block syncs.
 - **Jobs stuck in "running" for more than 10 minutes are requeued at startup** (crashed worker).
 - **Demo mode shifts fixture timestamps** so the fixture's `anchor` lands on "now". The demo never
